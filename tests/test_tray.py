@@ -1,7 +1,7 @@
-"""Vérifications de l'aiguillage des commandes du menu de la zone de notification.
+"""Checks for the dispatching of notification-area menu commands.
 
-Aucune fenêtre n'est créée : `_on_command` ne dépend que des identifiants et des
-fonctions de rappel.
+No window is created: `_on_command` only depends on the identifiers and the
+callbacks.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class Spy:
             on_quit=lambda: self.calls.append("quit"),
             on_suspend=lambda: self.calls.append("suspend"),
             on_resume=lambda: self.calls.append("resume"),
-            query_state=lambda: (False, "Aucune tâche programmée"),
+            query_state=lambda: (False, "No task scheduled"),
         )
 
 
@@ -68,7 +68,7 @@ def test_fixed_commands_keep_their_handler(spy: Spy, command: int, expected: str
 
 
 def test_identifier_ranges_do_not_overlap() -> None:
-    """Les commandes fixes ne doivent jamais tomber dans la plage du sous-menu."""
+    """Fixed commands must never fall within the submenu range."""
     fixed = {CMD_CONFIGURE, CMD_CANCEL, CMD_OPEN_LOG, CMD_QUIT}
     submenu = {CMD_POSTPONE_BASE + i for i in range(len(POSTPONE_CHOICES))}
     assert not fixed & submenu

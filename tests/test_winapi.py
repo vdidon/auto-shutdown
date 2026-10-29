@@ -1,7 +1,7 @@
-"""Vérifications de la couche Win32 et du formatage des durées.
+"""Checks for the Win32 layer and duration formatting.
 
-Ces tests appellent les vraies API Windows, mais aucune ne modifie l'état de la
-machine : création d'une icône en mémoire et lecture du temps d'inactivité.
+These tests call the real Windows APIs, but none of them changes the machine's
+state: creating an in-memory icon and reading the idle time.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="API propres à Windows")
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only APIs")
 
 from auto_shutdown import winapi  # noqa: E402
 from auto_shutdown.ui import format_duration  # noqa: E402
@@ -30,7 +30,7 @@ def test_make_icon_handles_usual_sizes(size: int) -> None:
 
 
 def test_idle_seconds_is_a_sane_duration() -> None:
-    """Le temps d'inactivité doit être positif et exempt de repliement 32 bits."""
+    """The idle time must be positive and free of 32-bit wraparound."""
     idle = winapi.idle_seconds()
     assert idle >= 0.0
     assert idle < 24 * 3600

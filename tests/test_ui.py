@@ -1,7 +1,7 @@
-"""Vérifications de la fenêtre de rappel.
+"""Checks for the reminder window.
 
-Ces tests construisent de vraies fenêtres tkinter sans jamais les afficher. Ils
-sont ignorés là où aucun affichage n'est disponible.
+These tests build real tkinter windows without ever showing them. They are
+skipped wherever no display is available.
 """
 
 from __future__ import annotations
@@ -20,16 +20,16 @@ from auto_shutdown.ui import ReminderWindow, UiCallbacks
 
 @pytest.fixture(scope="session")
 def root() -> Iterator[tk.Tk]:
-    """Racine tkinter unique pour toute la suite.
+    """Single tkinter root for the whole suite.
 
-    Une racine par test échouerait : tkinter tolère mal plusieurs instances de
-    `Tk` successives dans un même processus, et l'erreur se déguiserait alors en
-    absence d'affichage.
+    One root per test would fail: tkinter copes poorly with several successive
+    `Tk` instances in the same process, and the error would then pass for a
+    missing display.
     """
     try:
         window = tk.Tk()
-    except tk.TclError as exc:  # pragma: no cover - dépend de l'environnement
-        pytest.skip(f"tkinter indisponible : {exc}")
+    except tk.TclError as exc:  # pragma: no cover - depends on the environment
+        pytest.skip(f"tkinter unavailable: {exc}")
     window.withdraw()
     yield window
     window.destroy()
@@ -43,7 +43,7 @@ def snapshot() -> Snapshot:
 
 
 class SpyCallbacks:
-    """Enregistre ce que la fenêtre déclenche."""
+    """Records what the window triggers."""
 
     def __init__(self, snapshot: Snapshot) -> None:
         self.postponed: list[int] = []
@@ -64,7 +64,7 @@ class SpyCallbacks:
 
 
 def buttons_of(widget: tk.Misc) -> list[ttk.Button]:
-    """Collecte récursivement les boutons d'une fenêtre."""
+    """Recursively collects the buttons of a window."""
     found: list[ttk.Button] = []
     for child in widget.winfo_children():
         if isinstance(child, ttk.Button):
@@ -80,17 +80,17 @@ def test_reminder_offers_every_postpone_choice(root: tk.Tk, snapshot: Snapshot) 
         labels = [button.cget("text") for button in buttons_of(window._win)]
         for minutes in POSTPONE_CHOICES:
             assert f"{minutes} min" in labels
-        assert "Annuler" in labels
-        assert "Laisser faire" in labels
+        assert "Cancel" in labels
+        assert "Let it run" in labels
     finally:
         window.close()
 
 
 def test_each_postpone_button_sends_its_own_duration(root: tk.Tk, snapshot: Snapshot) -> None:
-    """Garde-fou contre la fermeture de boucle : chaque bouton doit être distinct.
+    """Guard against the loop-closure pitfall: each button must be distinct.
 
-    Écrit sans `minutes=minutes`, les quatre boutons transmettraient tous la
-    dernière durée de la boucle.
+    Written without `minutes=minutes`, all four buttons would send the last
+    duration of the loop.
     """
     for expected in POSTPONE_CHOICES:
         spy = SpyCallbacks(snapshot)
@@ -111,7 +111,7 @@ def test_cancel_button_cancels(root: tk.Tk, snapshot: Snapshot) -> None:
     spy = SpyCallbacks(snapshot)
     window = ReminderWindow(root, spy.as_callbacks(), snapshot)
     try:
-        target = next(b for b in buttons_of(window._win) if b.cget("text") == "Annuler")
+        target = next(b for b in buttons_of(window._win) if b.cget("text") == "Cancel")
         target.invoke()
     finally:
         window.close()

@@ -1,9 +1,9 @@
-"""Journalisation vers un fichier tournant.
+"""Logging to a rotating file.
 
-Chaque transition d'alimentation y est tracée avec son horodatage. C'est ce qui
-permet, après coup, de répondre à la question que les utilitaires de ce genre
-laissent en général sans réponse : *qu'est-ce qui a endormi ou réveillé la
-machine, et à quelle heure ?*
+Every power transition is recorded there with its timestamp. This is what makes
+it possible, after the fact, to answer the question that utilities of this kind
+usually leave unanswered: *what put the machine to sleep or woke it up, and at
+what time?*
 """
 
 from __future__ import annotations
@@ -24,13 +24,13 @@ def log_path() -> Path:
 
 
 def setup(*, verbose: bool = False) -> Path:
-    """Installe la journalisation fichier et console. Renvoie le chemin du journal."""
+    """Set up file and console logging. Return the log file path."""
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
-    # Éviter d'empiler les gestionnaires si `setup` est rappelé (tests, relance).
+    # Avoid stacking handlers if `setup` is called again (tests, relaunch).
     for handler in list(root.handlers):
         root.removeHandler(handler)
 

@@ -1,62 +1,62 @@
-# Journal des modifications
+# Changelog
 
-Le projet suit le [versionnage sémantique](https://semver.org/lang/fr/) :
-`MAJEUR.MINEUR.CORRECTIF`.
+The project follows [Semantic Versioning](https://semver.org/):
+`MAJOR.MINOR.PATCH`.
 
-- **MAJEUR** — rupture de compatibilité : format de configuration incompatible,
-  option de ligne de commande supprimée, comportement par défaut modifié d'une
-  manière qui surprendrait un utilisateur existant.
-- **MINEUR** — nouveauté rétrocompatible : action, déclencheur ou réglage
-  supplémentaire.
-- **CORRECTIF** — correction de bogue ou amélioration interne sans effet visible
-  sur les réglages existants.
+- **MAJOR** — breaking change: incompatible configuration format, removed
+  command-line option, or a default behavior changed in a way that would
+  surprise an existing user.
+- **MINOR** — backward-compatible addition: a new action, trigger or setting.
+- **PATCH** — bug fix or internal improvement with no visible effect on
+  existing settings.
 
-Le numéro vit dans `src/auto_shutdown/__init__.py` et dans `pyproject.toml` ; un
-test interdit aux deux de diverger, et exige une entrée ici pour la version
-courante.
+The number lives in `src/auto_shutdown/__init__.py` and in `pyproject.toml`; a
+test prevents the two from diverging, and requires an entry here for the
+current version.
 
 ---
 
 ## 0.1.0
 
-Première version.
+First release.
 
-### Programmation
+### Scheduling
 
-- Déclenchement après un délai exprimé en heures et minutes.
-- Six actions : veille prolongée, veille, arrêt, redémarrage, fermeture de
-  session, verrouillage de l'écran.
-- Rappel avant l'échéance, avec annulation, report ou poursuite.
-- Report de 5, 10, 15 ou 30 minutes, depuis le rappel comme depuis le menu de la
-  zone de notification.
+- Triggers after a delay expressed in hours and minutes.
+- Six actions: hibernate, sleep, shut down, restart, sign out, lock the screen.
+- Reminder before the deadline, with the choice to cancel, postpone or proceed.
+- Postpone by 5, 10, 15 or 30 minutes, from the reminder as well as from the
+  notification-area menu.
 
-### Fiabilité
+### Reliability
 
-Le défaut visé est le redéclenchement d'une tâche au retour de veille, qui
-renvoie la machine en veille quelques secondes après chaque réveil. Quatre
-mécanismes s'y opposent :
+The defect being targeted is a task firing again when the machine resumes from
+sleep, which sends it back to sleep a few seconds after every wake-up. Four
+mechanisms prevent it:
 
-- échéance fondée sur une horloge monotone, insensible aux changements d'heure ;
-- désarmement de la tâche avant l'exécution de l'action ;
-- annulation automatique à la reprise de veille, signalée par une notification ;
-- annulation lorsque le décompte a été interrompu plus d'une minute, signe d'une
-  machine suspendue — ce filet ne dépend d'aucune notification Windows.
+- the deadline is based on a monotonic clock, so clock changes do not affect it;
+- the task is disarmed before the action runs;
+- the task is cancelled automatically on resume, with a notification;
+- the task is cancelled when the countdown was interrupted for more than a
+  minute, a sign of a suspended machine — this safety net does not depend on
+  any Windows notification.
 
-S'y ajoute l'attente d'une période sans activité clavier ni souris avant toute
-suspension, qui évite le réveil immédiat sur les machines dont la souris est
-armée pour le réveil.
+On top of that, the app waits for a period without keyboard or mouse activity
+before any suspend, which avoids an immediate wake-up on machines whose mouse
+is armed to wake them.
 
 ### Interface
 
-- Icône de notification dont la couleur reflète l'état, menu contextuel,
-  info-bulles.
-- Fenêtre de configuration ouverte au lancement ; `--minimized` la supprime,
-  pour le lancement automatique à l'ouverture de session.
-- Journal horodaté de chaque armement, annulation, déclenchement et transition
-  d'alimentation, ouvrable depuis le menu.
+- Notification icon whose color reflects the state, context menu, tooltips.
+- Configuration window opened at launch; `--minimized` suppresses it, for
+  automatic launch at sign-in.
+- Timestamped log of every arming, cancellation, trigger and power transition,
+  which can be opened from the menu.
+- English and French interface, following the Windows display language;
+  any other language falls back to English.
 
 ### Distribution
 
-- Aucune dépendance d'exécution : `ctypes` et `tkinter` suffisent.
-- Exécutable autonome d'environ 12 Mo produit par `build.ps1`.
-- Icône générée en Python pur, sans Pillow.
+- No runtime dependency: `ctypes` and `tkinter` are enough.
+- Standalone executable of about 12 MB built by `build.ps1`.
+- Icon generated in pure Python, without Pillow.

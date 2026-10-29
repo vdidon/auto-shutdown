@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-    Construit l'exécutable autonome auto-shutdown.exe.
+    Builds the standalone auto-shutdown.exe executable.
 
 .DESCRIPTION
-    Régénère l'icône, puis assemble un exécutable unique et sans console.
-    Le résultat est déposé dans dist\auto-shutdown.exe et ne dépend d'aucun
-    Python installé sur la machine cible.
+    Regenerates the icon, then assembles a single executable with no console.
+    The result is placed in dist\auto-shutdown.exe and does not depend on any
+    Python installed on the target machine.
 
 .PARAMETER OneDir
-    Produit un dossier au lieu d'un fichier unique. Le démarrage est nettement
-    plus rapide, car rien n'est extrait dans %TEMP% à chaque lancement.
+    Produces a folder instead of a single file. Startup is noticeably faster,
+    because nothing is extracted to %TEMP% on each launch.
 
 .EXAMPLE
     .\build.ps1
@@ -23,13 +23,13 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-Write-Host '==> Dépendances' -ForegroundColor Cyan
+Write-Host '==> Dependencies' -ForegroundColor Cyan
 uv sync --group build
 
-Write-Host '==> Icône' -ForegroundColor Cyan
+Write-Host '==> Icon' -ForegroundColor Cyan
 uv run python tools/make_ico.py
 
-Write-Host '==> Assemblage' -ForegroundColor Cyan
+Write-Host '==> Build' -ForegroundColor Cyan
 $mode = if ($OneDir) { '--onedir' } else { '--onefile' }
 uv run pyinstaller `
     --noconfirm `
@@ -42,11 +42,11 @@ uv run pyinstaller `
     launcher.py
 
 if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller a échoué (code $LASTEXITCODE)"
+    throw "PyInstaller failed (code $LASTEXITCODE)"
 }
 
 $exe = if ($OneDir) { 'dist\auto-shutdown\auto-shutdown.exe' } else { 'dist\auto-shutdown.exe' }
 $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Write-Host ''
-Write-Host "==> $exe ($size Mo)" -ForegroundColor Green
-Write-Host 'Pour lancer au démarrage de session : placer un raccourci dans shell:startup'
+Write-Host "==> $exe ($size MB)" -ForegroundColor Green
+Write-Host 'To launch at sign-in: place a shortcut in shell:startup'

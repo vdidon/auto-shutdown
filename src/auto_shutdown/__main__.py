@@ -1,4 +1,4 @@
-"""Permet `python -m auto_shutdown`."""
+"""Enable `python -m auto_shutdown`."""
 
 from __future__ import annotations
 

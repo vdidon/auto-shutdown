@@ -1,4 +1,4 @@
-"""Vérifications de la configuration : bornes et tolérance aux fichiers abîmés."""
+"""Checks for the configuration: bounds and tolerance of damaged files."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from auto_shutdown.power import Action
 
 @pytest.fixture(autouse=True)
 def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirige la configuration vers un répertoire temporaire."""
+    """Redirects the configuration to a temporary directory."""
     monkeypatch.setattr(config_module, "config_dir", lambda: tmp_path)
     return tmp_path
 
@@ -34,8 +34,8 @@ def test_round_trip() -> None:
 
 
 def test_corrupted_file_falls_back_to_defaults(isolated_config: Path) -> None:
-    """Un fichier illisible ne doit jamais empêcher l'application de démarrer."""
-    (isolated_config / "config.json").write_text("{ ceci n'est pas du JSON", encoding="utf-8")
+    """An unreadable file must never prevent the application from starting."""
+    (isolated_config / "config.json").write_text("{ this is not JSON", encoding="utf-8")
     assert Config.load().delay_minutes == 30
 
 
@@ -62,7 +62,7 @@ def test_delay_is_clamped(stored: int, expected: int) -> None:
 
 
 def test_reminder_never_reaches_the_deadline() -> None:
-    """Un rappel égal au délai ne laisserait aucun temps de réaction."""
+    """A reminder equal to the delay would leave no time to react."""
     config = Config(delay_minutes=5, reminder_minutes=5)
     assert config.effective_reminder_minutes() == 4
 
@@ -73,7 +73,7 @@ def test_reminder_disabled_is_zero() -> None:
 
 
 def test_unknown_action_falls_back_to_hibernate() -> None:
-    assert Action.parse("PLIER_LE_LINGE") is Action.HIBERNATE
+    assert Action.parse("FOLD_THE_LAUNDRY") is Action.HIBERNATE
 
 
 def test_suspending_actions_are_identified() -> None:

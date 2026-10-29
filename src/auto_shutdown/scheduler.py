@@ -1,27 +1,26 @@
-"""Ordonnanceur d'une tâche unique, conçu pour ne jamais se déclencher deux fois.
+"""Single-task scheduler, designed to never fire twice.
 
-Quatre règles portent l'essentiel de la fiabilité :
+Four rules carry most of the reliability:
 
-1. **Base de temps monotone.** L'échéance est un instant `time.monotonic()`, pas
-   une date. Un changement d'heure système, un fuseau ou un décalage NTP ne
-   peuvent donc pas rendre l'échéance subitement « dépassée ».
-2. **Désarmement avant exécution.** La tâche quitte l'état armé *avant* que
-   l'action ne soit lancée. Il n'existe aucun instant où une tâche déjà partie
-   reste armée.
-3. **Annulation à la reprise de veille.** Toute reprise annule une tâche encore
-   armée. C'est ce qui interdit la boucle « réveil → ré-endormissement
-   immédiat » : après une reprise, seul l'utilisateur peut réarmer.
-4. **Détection d'interruption du décompte.** Si deux passages successifs sont
-   séparés par bien plus que la période de scrutation, c'est que le processus a
-   été gelé — machine suspendue. Une échéance franchie pendant ce gel est
-   annulée au lieu d'être exécutée.
+1. **Monotonic time base.** The deadline is a `time.monotonic()` instant, not a
+   date. A system clock change, a time zone change or an NTP adjustment
+   therefore cannot make the deadline suddenly "elapsed".
+2. **Disarm before executing.** The task leaves the armed state *before* the
+   action is launched. There is no instant at which a task that has already
+   fired remains armed.
+3. **Cancel on resume from sleep.** Any resume cancels a task that is still
+   armed. This is what rules out the "wake up -> immediately fall asleep again"
+   loop: after a resume, only the user can re-arm.
+4. **Countdown interruption detection.** If two successive polls are separated
+   by far more than the polling period, the process was frozen — the machine
+   was suspended. A deadline crossed during that freeze is cancelled instead
+   of being executed.
 
-La règle 4 est le filet de la règle 3. En veille moderne (`S0 Low Power Idle`),
-l'horloge monotone continue de progresser pendant la veille : une échéance peut
-donc être franchie sans que personne ne soit là pour la voir. Si la notification
-de reprise venait à manquer, l'action partirait dans la seconde suivant le
-réveil — exactement le défaut que ce projet corrige. La règle 4 ne dépend
-d'aucune notification Windows.
+Rule 4 is the safety net for rule 3. With modern standby (`S0 Low Power Idle`),
+the monotonic clock keeps advancing during sleep: a deadline can therefore be
+crossed with nobody there to see it. If the resume notification were ever
+missed, the action would fire within a second of waking up — exactly the defect
+this project fixes. Rule 4 does not depend on any Windows notification.
 """
 
 from __future__ import annotations
@@ -37,13 +36,13 @@ from .power import Action, execute
 
 log = logging.getLogger(__name__)
 
-#: Période de scrutation. Assez fine pour un compte à rebours à la seconde,
-#: assez large pour un coût processeur nul.
+#: Polling period. Fine enough for a per-second countdown, coarse enough for
+#: zero CPU cost.
 TICK_SECONDS = 0.25
 
-#: Au-delà de cet écart entre deux passages, le décompte est considéré comme
-#: ayant été interrompu. Large devant `TICK_SECONDS` et devant tout à-coup
-#: d'ordonnancement du système, court devant n'importe quelle veille réelle.
+#: Beyond this gap between two polls, the countdown is considered to have been
+#: interrupted. Large compared to `TICK_SECONDS` and to any OS scheduling
+#: hiccup, short compared to any real sleep.
 STALL_THRESHOLD_SECONDS = 60.0
 
 
@@ -54,15 +53,15 @@ class State(Enum):
 
 
 class CancelReason(Enum):
-    USER = "annulée par l'utilisateur"
-    RESUME = "annulée automatiquement au retour de veille"
-    STALL = "annulée : le décompte a été interrompu"
-    SHUTDOWN = "arrêt de l'application"
+    USER = "cancelled by the user"
+    RESUME = "cancelled automatically on resume from sleep"
+    STALL = "cancelled: the countdown was interrupted"
+    SHUTDOWN = "application shutting down"
 
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
-    """Vue instantanée et immuable de l'état, sûre à lire depuis un autre thread."""
+    """Immutable point-in-time view of the state, safe to read from another thread."""
 
     state: State
     action: Action | None
@@ -75,13 +74,13 @@ class Snapshot:
 
 
 class Scheduler:
-    """Gère une tâche unique et son compte à rebours.
+    """Manage a single task and its countdown.
 
-    Les fonctions de rappel sont invoquées depuis le thread interne : à charge
-    de l'appelant de les réacheminer vers son thread d'interface.
+    Callbacks are invoked from the internal thread: it is up to the caller to
+    forward them to its UI thread.
     """
 
-    def __init__(  # noqa: PLR0913  (réglages et rappels, tous nommés et facultatifs)
+    def __init__(  # noqa: PLR0913  (settings and callbacks, all named and optional)
         self,
         *,
         quiet_seconds: float = 3.0,
@@ -94,8 +93,8 @@ class Scheduler:
         clock: Callable[[], float] = time.monotonic,
         runner: Callable[[Action], None] | None = None,
     ) -> None:
-        # `clock` et `runner` sont injectables pour que la logique d'échéance
-        # soit vérifiable sans attendre le temps réel ni endormir la machine.
+        # `clock` and `runner` are injectable so the deadline logic can be
+        # tested without waiting in real time or putting the machine to sleep.
         self._clock = clock
         self._runner = runner or self._default_runner
         self._lock = threading.RLock()
@@ -119,7 +118,7 @@ class Scheduler:
 
         self._thread = threading.Thread(target=self._run, name="scheduler", daemon=True)
 
-    # -- cycle de vie ------------------------------------------------------
+    # -- lifecycle ---------------------------------------------------------
 
     def start(self) -> None:
         self._thread.start()
@@ -133,49 +132,49 @@ class Scheduler:
         if was_armed:
             self._notify(self._on_cancelled, CancelReason.SHUTDOWN)
 
-    # -- commandes ---------------------------------------------------------
+    # -- commands ----------------------------------------------------------
 
     def arm(self, action: Action, delay_minutes: int, reminder_minutes: int = 0) -> Snapshot:
-        """Arme la tâche pour dans `delay_minutes` minutes."""
+        """Arm the task to fire in `delay_minutes` minutes."""
         now = self._clock()
         delay = max(0, int(delay_minutes)) * 60.0
         with self._lock:
             self._action = action
             self._deadline = now + delay
             reminder = max(0, int(reminder_minutes)) * 60.0
-            # Le rappel n'a de sens que s'il tombe dans le futur et avant l'échéance.
+            # A reminder only makes sense if it falls in the future and before the deadline.
             self._reminder_at = now + delay - reminder if 0 < reminder < delay else None
             self._state = State.ARMED
-            # Repartir de l'instant présent : le temps écoulé avant l'armement
-            # ne doit pas être compté comme une interruption du décompte.
+            # Restart from the present instant: the time elapsed before arming
+            # must not be counted as a countdown interruption.
             self._last_poll = now
             snapshot = self._snapshot_locked(now)
         log.info(
-            "Tâche armée : %s dans %d min (rappel %s)",
+            "Task armed: %s in %d min (reminder %s)",
             action.name,
             delay_minutes,
-            f"{reminder_minutes} min avant" if self._reminder_at else "désactivé",
+            f"{reminder_minutes} min before" if self._reminder_at else "disabled",
         )
         self._wake.set()
         return snapshot
 
     def cancel(self, reason: CancelReason = CancelReason.USER) -> bool:
-        """Désarme la tâche. Renvoie `True` si une tâche était bien armée."""
+        """Disarm the task. Return `True` if a task was actually armed."""
         with self._lock:
             if self._state not in (State.ARMED, State.REMINDING):
                 return False
             action = self._action
             self._reset()
-        log.info("Tâche %s annulée (%s)", action.name if action else "?", reason.value)
+        log.info("Task %s cancelled (%s)", action.name if action else "?", reason.value)
         self._wake.set()
         self._notify(self._on_cancelled, reason)
         return True
 
     def postpone(self, minutes: int) -> Snapshot | None:
-        """Repousse l'échéance de `minutes` à partir de maintenant.
+        """Push the deadline back to `minutes` from now.
 
-        Le rappel est reconduit avec la même avance, sauf si celle-ci ne tient
-        plus dans le nouveau délai.
+        The reminder is kept with the same lead time, unless that no longer
+        fits within the new delay.
         """
         with self._lock:
             if self._state not in (State.ARMED, State.REMINDING) or self._action is None:
@@ -189,40 +188,39 @@ class Scheduler:
         reminder = previous_reminder if previous_reminder < minutes else 0
         return self.arm(action, minutes, reminder)
 
-    # -- notifications d'alimentation --------------------------------------
+    # -- power notifications -----------------------------------------------
 
     def on_suspend(self) -> None:
-        """Le système part en veille (`PBT_APMSUSPEND`)."""
-        log.info("Notification système : entrée en veille")
+        """The system is going to sleep (`PBT_APMSUSPEND`)."""
+        log.info("System notification: entering sleep")
 
     def on_resume(self) -> None:
-        """Le système sort de veille (`PBT_APMRESUME*`).
+        """The system is resuming from sleep (`PBT_APMRESUME*`).
 
-        Point central du correctif. Une tâche encore armée est annulée plutôt
-        que laissée à courir : sans cela, une échéance perçue comme dépassée se
-        déclenche dans les secondes qui suivent la reprise et renvoie la machine
-        en veille.
+        Core of the fix. A task that is still armed is cancelled rather than
+        left running: without this, a deadline perceived as elapsed fires within
+        seconds of the resume and puts the machine back to sleep.
 
-        Windows émet souvent `PBT_APMRESUMESUSPEND` puis
-        `PBT_APMRESUMEAUTOMATIC` pour une même reprise : le traitement est donc
+        Windows often emits `PBT_APMRESUMESUSPEND` then
+        `PBT_APMRESUMEAUTOMATIC` for a single resume: the handling is therefore
         idempotent.
         """
         with self._lock:
             armed = self._state in (State.ARMED, State.REMINDING)
             if armed:
                 self._reset()
-            # Le décompte reprend d'ici : l'intervalle passé en veille ne doit
-            # pas être compté deux fois par la détection d'interruption.
+            # The countdown resumes from here: the interval spent asleep must
+            # not be counted twice by the interruption detection.
             self._last_poll = self._clock()
         log.info(
-            "Notification système : retour de veille%s",
-            " — tâche armée annulée" if armed else "",
+            "System notification: resume from sleep%s",
+            " — armed task cancelled" if armed else "",
         )
         self._wake.set()
         if armed:
             self._notify(self._on_cancelled, CancelReason.RESUME)
 
-    # -- lecture -----------------------------------------------------------
+    # -- reading -----------------------------------------------------------
 
     def snapshot(self) -> Snapshot:
         with self._lock:
@@ -237,10 +235,10 @@ class Scheduler:
             reminder_active=self._state is State.REMINDING,
         )
 
-    # -- boucle interne ----------------------------------------------------
+    # -- internal loop -----------------------------------------------------
 
     def _reset(self) -> None:
-        """Remet l'état au repos. À n'appeler qu'en tenant le verrou."""
+        """Return the state to idle. Call only while holding the lock."""
         self._state = State.IDLE
         self._action = None
         self._deadline = None
@@ -255,10 +253,10 @@ class Scheduler:
             self.poll()
 
     def poll(self) -> None:
-        """Fait avancer l'ordonnanceur d'un pas.
+        """Advance the scheduler by one step.
 
-        Appelée par la boucle interne ; publique pour permettre de piloter
-        l'ordonnanceur avec une horloge simulée.
+        Called by the internal loop; public so the scheduler can be driven
+        with a simulated clock.
         """
         now = self._clock()
         due_action: Action | None = None
@@ -272,14 +270,14 @@ class Scheduler:
             if self._state not in (State.ARMED, State.REMINDING) or self._deadline is None:
                 return
 
-            # Règle 4 : un trou dans le décompte signale une machine suspendue.
-            # L'échéance franchie pendant ce trou n'est pas jouée.
+            # Rule 4: a gap in the countdown signals a suspended machine.
+            # A deadline crossed during that gap is not played.
             if previous_poll is not None and now - previous_poll > self._stall_threshold:
                 stalled = True
                 self._reset()
             elif now >= self._deadline:
-                # Règle 2 : on désarme d'abord, on exécute ensuite. Si l'action
-                # rend la main (retour de veille), il ne reste rien d'armé.
+                # Rule 2: disarm first, execute afterwards. If the action
+                # returns (resume from sleep), nothing is left armed.
                 due_action = self._action
                 self._reset()
             elif (
@@ -294,7 +292,7 @@ class Scheduler:
 
         if stalled:
             log.warning(
-                "Décompte interrompu pendant %.0f s : tâche annulée par sécurité",
+                "Countdown interrupted for %.0f s: task cancelled as a precaution",
                 now - (previous_poll or now),
             )
             self._notify(self._on_cancelled, CancelReason.STALL)
@@ -304,7 +302,7 @@ class Scheduler:
             return
         if reminder_snapshot is not None:
             log.info(
-                "Rappel : %s dans %.0f s",
+                "Reminder: %s in %.0f s",
                 reminder_snapshot.action.name if reminder_snapshot.action else "?",
                 reminder_snapshot.remaining,
             )
@@ -316,9 +314,9 @@ class Scheduler:
         self._runner(action)
 
     def _default_runner(self, action: Action) -> None:
-        # `execute` bloque jusqu'au réveil pour une mise en veille : il lui faut
-        # son propre thread, sinon la boucle ne verrait plus passer ni les
-        # annulations ni les notifications d'alimentation.
+        # `execute` blocks until wake-up for a sleep: it needs its own thread,
+        # otherwise the loop would no longer see cancellations or power
+        # notifications go by.
         threading.Thread(
             target=self._execute_guarded, args=(action,), name="power-action", daemon=True
         ).start()
@@ -331,17 +329,17 @@ class Scheduler:
                 quiet_timeout=self._quiet_timeout,
             )
         except OSError:
-            log.exception("Échec de l'action %s", action.name)
+            log.exception("Action %s failed", action.name)
 
     def _notify[T](self, callback: Callable[[T], None] | None, value: T) -> None:
-        """Invoque une fonction de rappel sans jamais laisser remonter d'exception.
+        """Invoke a callback without ever letting an exception propagate.
 
-        Une erreur d'interface ne doit pas tuer le thread d'ordonnancement, au
-        risque de laisser une tâche armée que plus rien ne surveille.
+        A UI error must not kill the scheduling thread, which would risk leaving
+        an armed task that nothing is watching anymore.
         """
         if callback is None:
             return
         try:
             callback(value)
         except Exception:
-            log.exception("Erreur dans une fonction de rappel de l'ordonnanceur")
+            log.exception("Error in a scheduler callback")

@@ -1,12 +1,11 @@
-"""Liaison ctypes vers les API Windows dont l'application a besoin.
+"""ctypes bindings for the Windows APIs the application needs.
 
-Aucune dépendance externe : tout passe par `ctypes`, ce qui évite d'embarquer
-`pywin32` (binaire compilé) et garantit le fonctionnement sur n'importe quelle
-version de CPython.
+No external dependency: everything goes through `ctypes`, which avoids bundling
+`pywin32` (a compiled binary) and works on any CPython version.
 
-Les prototypes (`argtypes` / `restype`) sont déclarés systématiquement. Sans eux,
-ctypes tronque les handles à 32 bits sur un Python 64 bits et les appels
-échouent de manière silencieuse et non reproductible.
+Prototypes (`argtypes` / `restype`) are always declared. Without them, ctypes
+truncates handles to 32 bits on a 64-bit Python and calls fail silently and
+non-reproducibly.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from ctypes import wintypes
 from typing import Final
 
 # ---------------------------------------------------------------------------
-# Types manquants dans ctypes.wintypes
+# Types missing from ctypes.wintypes
 # ---------------------------------------------------------------------------
 
 LRESULT = ctypes.c_ssize_t
@@ -34,7 +33,7 @@ advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 powrprof = ctypes.WinDLL("powrprof", use_last_error=True)
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constants
 # ---------------------------------------------------------------------------
 
 WM_DESTROY: Final = 0x0002
@@ -45,23 +44,23 @@ WM_COMMAND: Final = 0x0111
 WM_POWERBROADCAST: Final = 0x0218
 WM_APP: Final = 0x8000
 
-#: Message privé émis par la zone de notification vers notre fenêtre.
+#: Private message sent by the notification area to our window.
 WM_TRAYICON: Final = WM_APP + 1
-#: Message privé permettant à un autre thread de demander une action au thread UI.
+#: Private message letting another thread ask the UI thread to perform an action.
 WM_INVOKE: Final = WM_APP + 2
 
 WM_LBUTTONUP: Final = 0x0202
 WM_LBUTTONDBLCLK: Final = 0x0203
 WM_RBUTTONUP: Final = 0x0205
 
-# Événements PBT_* reçus dans WM_POWERBROADCAST.
+# PBT_* events received in WM_POWERBROADCAST.
 PBT_APMSUSPEND: Final = 0x0004
 PBT_APMRESUMESUSPEND: Final = 0x0007
 PBT_APMRESUMEAUTOMATIC: Final = 0x0012
 
 DEVICE_NOTIFY_WINDOW_HANDLE: Final = 0x00000000
 
-# Zone de notification.
+# Notification area.
 NIM_ADD: Final = 0x00000000
 NIM_MODIFY: Final = 0x00000001
 NIM_DELETE: Final = 0x00000002
@@ -81,11 +80,11 @@ MF_POPUP: Final = 0x00000010
 TPM_RIGHTBUTTON: Final = 0x0002
 TPM_RETURNCMD: Final = 0x0100
 
-# Fenêtres.
+# Windows.
 CW_USEDEFAULT: Final = -0x80000000
 WS_OVERLAPPED: Final = 0x00000000
 
-# Privilèges.
+# Privileges.
 TOKEN_ADJUST_PRIVILEGES: Final = 0x0020
 TOKEN_QUERY: Final = 0x0008
 SE_PRIVILEGE_ENABLED: Final = 0x00000002
@@ -163,11 +162,11 @@ class LUID(ctypes.Structure):
     _fields_ = (("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG))
 
 
-class LUID_AND_ATTRIBUTES(ctypes.Structure):  # noqa: N801  (nom de l'API Windows)
+class LUID_AND_ATTRIBUTES(ctypes.Structure):  # noqa: N801  (Windows API name)
     _fields_ = (("Luid", LUID), ("Attributes", wintypes.DWORD))
 
 
-class TOKEN_PRIVILEGES(ctypes.Structure):  # noqa: N801  (nom de l'API Windows)
+class TOKEN_PRIVILEGES(ctypes.Structure):  # noqa: N801  (Windows API name)
     _fields_ = (("PrivilegeCount", wintypes.DWORD), ("Privileges", LUID_AND_ATTRIBUTES * 1))
 
 
@@ -324,6 +323,14 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 
+kernel32.GetUserPreferredUILanguages.argtypes = (
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.ULONG),
+    wintypes.LPWSTR,
+    ctypes.POINTER(wintypes.ULONG),
+)
+kernel32.GetUserPreferredUILanguages.restype = wintypes.BOOL
+
 shell32.Shell_NotifyIconW.argtypes = (wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
@@ -355,18 +362,40 @@ powrprof.SetSuspendState.argtypes = (wintypes.BOOL, wintypes.BOOL, wintypes.BOOL
 powrprof.SetSuspendState.restype = wintypes.BOOL
 
 # ---------------------------------------------------------------------------
-# Aides de haut niveau
+# High-level helpers
 # ---------------------------------------------------------------------------
 
 ERROR_ALREADY_EXISTS: Final = 183
+MUI_LANGUAGE_NAME: Final = 0x8
+
+
+def preferred_ui_languages() -> list[str]:
+    """User's display languages, most preferred first (e.g. `["fr-FR", "en-US"]`).
+
+    Returns an empty list if Windows cannot provide them.
+    """
+    count = wintypes.ULONG()
+    size = wintypes.ULONG()
+    if not kernel32.GetUserPreferredUILanguages(
+        MUI_LANGUAGE_NAME, ctypes.byref(count), None, ctypes.byref(size)
+    ):
+        return []
+    buffer = ctypes.create_unicode_buffer(size.value)
+    if not kernel32.GetUserPreferredUILanguages(
+        MUI_LANGUAGE_NAME, ctypes.byref(count), buffer, ctypes.byref(size)
+    ):
+        return []
+    # Double-null-terminated list: names separated by NUL, ending with an empty one.
+    names = ctypes.wstring_at(ctypes.addressof(buffer), size.value)
+    return [name for name in names.split("\0") if name]
 
 
 def idle_seconds() -> float:
-    """Durée écoulée depuis la dernière entrée clavier/souris, en secondes.
+    """Time elapsed since the last keyboard/mouse input, in seconds.
 
-    Repose sur `GetLastInputInfo`, dont le compteur est exprimé dans la même
-    base que `GetTickCount` : les deux sont lus ensemble pour éviter tout
-    problème de repliement sur 32 bits.
+    Relies on `GetLastInputInfo`, whose counter uses the same time base as
+    `GetTickCount`: both are read together to avoid any 32-bit wrap-around
+    problem.
     """
     info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
     if not user32.GetLastInputInfo(ctypes.byref(info)):
@@ -377,10 +406,10 @@ def idle_seconds() -> float:
 
 
 def enable_shutdown_privilege() -> bool:
-    """Active `SeShutdownPrivilege` pour le processus courant.
+    """Enable `SeShutdownPrivilege` for the current process.
 
-    Requis par `ExitWindowsEx` (arrêt, redémarrage, fermeture de session).
-    La veille et la veille prolongée n'en ont pas besoin.
+    Required by `ExitWindowsEx` (shutdown, restart, log off).
+    Sleep and hibernate do not need it.
     """
     token = wintypes.HANDLE()
     process = kernel32.GetCurrentProcess()
@@ -397,17 +426,17 @@ def enable_shutdown_privilege() -> bool:
         privileges.Privileges[0].Luid = luid
         privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
         advapi32.AdjustTokenPrivileges(token, False, ctypes.byref(privileges), 0, None, None)
-        # AdjustTokenPrivileges renvoie TRUE même en cas de succès partiel :
-        # seul GetLastError distingue les deux cas.
+        # AdjustTokenPrivileges returns TRUE even on partial success:
+        # only GetLastError tells the two cases apart.
         return ctypes.get_last_error() == 0
     finally:
         kernel32.CloseHandle(token)
 
 
 def acquire_single_instance_mutex(name: str) -> int | None:
-    """Crée un mutex nommé ; renvoie `None` si une instance tourne déjà.
+    """Create a named mutex; return `None` if an instance is already running.
 
-    Le handle renvoyé doit rester vivant pendant toute la durée du processus.
+    The returned handle must stay alive for the whole lifetime of the process.
     """
     handle = kernel32.CreateMutexW(None, True, name)
     if not handle:
@@ -419,13 +448,13 @@ def acquire_single_instance_mutex(name: str) -> int | None:
 
 
 def make_icon(rgb: tuple[int, int, int], size: int = 32) -> wintypes.HICON:
-    """Construit en mémoire une icône ronde de la couleur demandée.
+    """Build a round icon of the requested color in memory.
 
-    Évite d'embarquer des fichiers `.ico` et permet de refléter l'état de
-    l'application par la couleur. L'icône est fabriquée au format d'une
-    ressource `RT_ICON` — un `BITMAPINFOHEADER` de hauteur double (plan
-    couleur puis masque AND) suivi des pixels en BGRA, rangés du bas vers
-    le haut — puis convertie par `CreateIconFromResourceEx`.
+    Avoids bundling `.ico` files and lets the icon reflect the application
+    state through its color. The icon is built in the format of an `RT_ICON`
+    resource — a `BITMAPINFOHEADER` of double height (color plane then AND
+    mask) followed by BGRA pixels stored bottom-up — then converted by
+    `CreateIconFromResourceEx`.
     """
     red, green, blue = rgb
     header = BITMAPINFOHEADER(
@@ -442,11 +471,11 @@ def make_icon(rgb: tuple[int, int, int], size: int = 32) -> wintypes.HICON:
     centre = (size - 1) / 2.0
     radius = size / 2.0 - 1.5
     for row in range(size):
-        # Les lignes sont stockées du bas vers le haut.
+        # Rows are stored bottom-up.
         y = size - 1 - row
         for x in range(size):
             distance = ((x - centre) ** 2 + (y - centre) ** 2) ** 0.5
-            # Dégradé d'un pixel en bordure : suffit à lisser le cercle.
+            # One-pixel gradient at the edge: enough to smooth the circle.
             alpha = max(0.0, min(1.0, radius - distance + 0.5))
             offset = (row * size + x) * 4
             pixels[offset] = int(blue * alpha)
@@ -454,7 +483,7 @@ def make_icon(rgb: tuple[int, int, int], size: int = 32) -> wintypes.HICON:
             pixels[offset + 2] = int(red * alpha)
             pixels[offset + 3] = int(255 * alpha)
 
-    # Masque AND laissé à zéro : la couche alpha porte déjà la transparence.
+    # AND mask left at zero: the alpha channel already carries the transparency.
     mask = bytes(size * 4)
     blob = bytes(header) + bytes(pixels) + mask
     buffer = (ctypes.c_byte * len(blob)).from_buffer_copy(blob)

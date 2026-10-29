@@ -1,14 +1,14 @@
-"""Vérifications de l'ordonnanceur, horloge et exécuteur simulés.
+"""Checks for the scheduler, with a simulated clock and executor.
 
-Les scénarios reproduisent les défaillances observées dans le journal Windows
-de la machine ayant motivé ce projet : une tâche programmée y était rejouée
-deux secondes après chaque retour de veille, renvoyant aussitôt le poste en
-veille prolongée.
+The scenarios reproduce the failures observed in the Windows event log of the
+machine that motivated this project: a scheduled task was replayed two seconds
+after every resume from sleep, immediately sending the PC back into
+hibernation.
 
-Le temps avance par `run_for`, qui rejoue la boucle réelle à petits pas. Faire
-bondir l'horloge entre deux passages simulerait une machine suspendue et
-déclencherait la détection d'interruption : c'est justement ce que `run_for`
-évite, et ce que les tests dédiés provoquent délibérément.
+Time advances through `run_for`, which replays the real loop in small steps.
+Jumping the clock between two ticks would simulate a suspended machine and
+trigger the interruption detection: that is exactly what `run_for` avoids, and
+what the dedicated tests provoke deliberately.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from auto_shutdown.scheduler import CancelReason, Scheduler, State
 
 
 class FakeClock:
-    """Horloge monotone pilotée à la main."""
+    """Monotonic clock driven by hand."""
 
     def __init__(self, start: float = 1_000.0) -> None:
         self.now = start
@@ -34,7 +34,7 @@ class FakeClock:
 
 
 class Recorder:
-    """Exécuteur de remplacement : mémorise au lieu d'endormir la machine."""
+    """Stand-in executor: records instead of putting the machine to sleep."""
 
     def __init__(self) -> None:
         self.actions: list[Action] = []
@@ -61,13 +61,13 @@ def make_scheduler(clock: FakeClock, runner: Recorder, **kwargs: object) -> Sche
         on_cancelled=cancellations.append,
         **kwargs,  # type: ignore[arg-type]
     )
-    # Exposé pour les assertions ; l'ordonnanceur n'en a pas connaissance.
+    # Exposed for assertions; the scheduler knows nothing about it.
     scheduler.cancellations = cancellations  # type: ignore[attr-defined]
     return scheduler
 
 
 def run_for(scheduler: Scheduler, clock: FakeClock, seconds: float, step: float = 10.0) -> None:
-    """Fait avancer l'ordonnanceur comme sa boucle interne, à petits pas."""
+    """Advances the scheduler like its internal loop does, in small steps."""
     elapsed = 0.0
     while elapsed < seconds:
         delta = min(step, seconds - elapsed)
@@ -76,7 +76,7 @@ def run_for(scheduler: Scheduler, clock: FakeClock, seconds: float, step: float 
         elapsed += delta
 
 
-# -- déclenchement nominal ---------------------------------------------------
+# -- nominal trigger ---------------------------------------------------------
 
 
 def test_fires_once_at_deadline(clock: FakeClock, runner: Recorder) -> None:
@@ -91,7 +91,7 @@ def test_fires_once_at_deadline(clock: FakeClock, runner: Recorder) -> None:
 
 
 def test_does_not_fire_twice(clock: FakeClock, runner: Recorder) -> None:
-    """Un désarmement précède l'exécution : aucun second passage possible."""
+    """Disarming precedes execution: no second run is possible."""
     scheduler = make_scheduler(clock, runner)
     scheduler.arm(Action.SLEEP, 10)
 
@@ -112,11 +112,11 @@ def test_remaining_counts_down(clock: FakeClock, runner: Recorder) -> None:
     assert scheduler.snapshot().remaining == pytest.approx(180.0)
 
 
-# -- le correctif : reprise de veille ----------------------------------------
+# -- the fix: resume from sleep ----------------------------------------------
 
 
 def test_resume_cancels_armed_task(clock: FakeClock, runner: Recorder) -> None:
-    """Une reprise de veille désarme la tâche au lieu de la laisser courir."""
+    """A resume from sleep disarms the task instead of letting it run."""
     scheduler = make_scheduler(clock, runner)
     scheduler.arm(Action.HIBERNATE, 30)
 
@@ -126,17 +126,17 @@ def test_resume_cancels_armed_task(clock: FakeClock, runner: Recorder) -> None:
     assert not scheduler.snapshot().armed
     assert scheduler.cancellations == [CancelReason.RESUME]  # type: ignore[attr-defined]
 
-    # Passé l'échéance initiale, plus rien ne se déclenche.
+    # Past the original deadline, nothing fires anymore.
     run_for(scheduler, clock, 60 * 60)
     assert runner.actions == []
 
 
 def test_no_relaunch_after_hibernation_cycle(clock: FakeClock, runner: Recorder) -> None:
-    """Scénario complet observé sur la machine d'origine.
+    """Full scenario observed on the original machine.
 
-    Une hibernation part à l'heure prévue ; la machine est rallumée le
-    lendemain matin. Le défaut consistait à réexécuter l'action dans les
-    secondes suivant la reprise. Rien ne doit repartir sans action explicite.
+    A hibernation starts at the scheduled time; the machine is turned back on
+    the next morning. The defect was to run the action again within seconds of
+    the resume. Nothing must start again without an explicit action.
     """
     scheduler = make_scheduler(clock, runner)
     scheduler.arm(Action.HIBERNATE, 30)
@@ -144,8 +144,8 @@ def test_no_relaunch_after_hibernation_cycle(clock: FakeClock, runner: Recorder)
     run_for(scheduler, clock, 30 * 60)
     assert runner.actions == [Action.HIBERNATE]
 
-    # `time.monotonic` ne progresse pas pendant l'hibernation : au réveil,
-    # l'horloge reprend là où elle s'était arrêtée.
+    # `time.monotonic` does not advance during hibernation: on wake-up, the
+    # clock picks up where it stopped.
     scheduler.on_resume()
     run_for(scheduler, clock, 50, step=1.0)
 
@@ -154,7 +154,7 @@ def test_no_relaunch_after_hibernation_cycle(clock: FakeClock, runner: Recorder)
 
 
 def test_user_can_arm_right_after_resume(clock: FakeClock, runner: Recorder) -> None:
-    """L'annulation automatique ne doit pas empêcher un réarmement volontaire."""
+    """The automatic cancellation must not prevent a deliberate re-arm."""
     scheduler = make_scheduler(clock, runner)
     scheduler.arm(Action.HIBERNATE, 30)
     scheduler.on_resume()
@@ -166,28 +166,28 @@ def test_user_can_arm_right_after_resume(clock: FakeClock, runner: Recorder) -> 
 
 
 def test_resume_without_armed_task_is_silent(clock: FakeClock, runner: Recorder) -> None:
-    """Les deux événements PBT_* d'une même reprise ne doivent pas doubler."""
+    """The two PBT_* events of a single resume must not double up."""
     scheduler = make_scheduler(clock, runner)
     scheduler.on_resume()
     scheduler.on_resume()
     assert scheduler.cancellations == []  # type: ignore[attr-defined]
 
 
-# -- le filet : décompte interrompu ------------------------------------------
+# -- the safety net: interrupted countdown -----------------------------------
 
 
 def test_stalled_countdown_cancels_instead_of_firing(clock: FakeClock, runner: Recorder) -> None:
-    """Sans notification de reprise, un trou dans le décompte protège encore.
+    """Without a resume notification, a gap in the countdown still protects.
 
-    Reproduit la veille moderne : l'horloge monotone progresse pendant la
-    veille, l'échéance est donc franchie sans témoin. L'action ne doit pas
-    partir au réveil.
+    Reproduces modern standby: the monotonic clock advances during sleep, so
+    the deadline is crossed with no witness. The action must not start on
+    wake-up.
     """
     scheduler = make_scheduler(clock, runner, stall_threshold=60.0)
     scheduler.arm(Action.HIBERNATE, 30)
     scheduler.poll()
 
-    # La machine est suspendue : plus aucun passage pendant deux heures.
+    # The machine is suspended: no tick at all for two hours.
     clock.advance(2 * 60 * 60)
     scheduler.poll()
 
@@ -197,7 +197,7 @@ def test_stalled_countdown_cancels_instead_of_firing(clock: FakeClock, runner: R
 
 
 def test_normal_jitter_does_not_trigger_stall(clock: FakeClock, runner: Recorder) -> None:
-    """Un à-coup d'ordonnancement ordinaire ne doit pas annuler la tâche."""
+    """An ordinary scheduling hiccup must not cancel the task."""
     scheduler = make_scheduler(clock, runner, stall_threshold=60.0)
     scheduler.arm(Action.SLEEP, 10)
 
@@ -208,7 +208,7 @@ def test_normal_jitter_does_not_trigger_stall(clock: FakeClock, runner: Recorder
 
 
 def test_long_idle_before_arming_is_not_a_stall(clock: FakeClock, runner: Recorder) -> None:
-    """Une longue période au repos avant l'armement n'est pas une interruption."""
+    """A long idle period before arming is not an interruption."""
     scheduler = make_scheduler(clock, runner, stall_threshold=60.0)
 
     clock.advance(6 * 60 * 60)
@@ -220,7 +220,7 @@ def test_long_idle_before_arming_is_not_a_stall(clock: FakeClock, runner: Record
     assert runner.actions == [Action.LOCK]
 
 
-# -- annulation et report ----------------------------------------------------
+# -- cancel and postpone -----------------------------------------------------
 
 
 def test_cancel_disarms(clock: FakeClock, runner: Recorder) -> None:
@@ -228,7 +228,7 @@ def test_cancel_disarms(clock: FakeClock, runner: Recorder) -> None:
     scheduler.arm(Action.SHUTDOWN, 15)
 
     assert scheduler.cancel() is True
-    assert scheduler.cancel() is False  # plus rien à annuler
+    assert scheduler.cancel() is False  # nothing left to cancel
 
     run_for(scheduler, clock, 20 * 60)
     assert runner.actions == []
@@ -258,7 +258,7 @@ def test_postpone_without_task_does_nothing(clock: FakeClock, runner: Recorder) 
 def test_every_postpone_choice_pushes_the_deadline(
     clock: FakeClock, runner: Recorder, minutes: int
 ) -> None:
-    """Chaque durée proposée à l'utilisateur doit reporter d'autant."""
+    """Every duration offered to the user must postpone by that much."""
     scheduler = make_scheduler(clock, runner)
     scheduler.arm(Action.HIBERNATE, 30, reminder_minutes=5)
     run_for(scheduler, clock, 26 * 60)
@@ -276,7 +276,7 @@ def test_every_postpone_choice_pushes_the_deadline(
 def test_short_postpone_drops_a_reminder_that_no_longer_fits(
     clock: FakeClock, runner: Recorder
 ) -> None:
-    """Reporter de 5 min avec un rappel à 5 min le ferait tomber aussitôt."""
+    """Postponing by 5 min with a 5 min reminder would make it fire immediately."""
     reminders: list[float] = []
     scheduler = Scheduler(
         clock=clock, runner=runner, on_reminder=lambda snap: reminders.append(snap.remaining)
@@ -307,7 +307,7 @@ def test_postpone_keeps_reminder_when_it_still_fits(clock: FakeClock, runner: Re
     assert len(reminders) == 2
 
 
-# -- rappel ------------------------------------------------------------------
+# -- reminder ----------------------------------------------------------------
 
 
 def test_reminder_fires_ahead_of_deadline(clock: FakeClock, runner: Recorder) -> None:
@@ -340,7 +340,7 @@ def test_reminder_fires_only_once(clock: FakeClock, runner: Recorder) -> None:
 
 
 def test_reminder_longer_than_delay_is_ignored(clock: FakeClock, runner: Recorder) -> None:
-    """Un rappel plus large que le délai déclencherait l'action sans préavis."""
+    """A reminder wider than the delay would trigger the action without notice."""
     reminders: list[float] = []
     scheduler = Scheduler(
         clock=clock, runner=runner, on_reminder=lambda snap: reminders.append(snap.remaining)
@@ -375,7 +375,7 @@ def test_resume_during_reminder_cancels(clock: FakeClock, runner: Recorder) -> N
     assert runner.actions == []
 
 
-# -- robustesse --------------------------------------------------------------
+# -- robustness --------------------------------------------------------------
 
 
 def test_arm_replaces_previous_task(clock: FakeClock, runner: Recorder) -> None:
@@ -391,10 +391,10 @@ def test_arm_replaces_previous_task(clock: FakeClock, runner: Recorder) -> None:
 
 
 def test_callback_error_does_not_break_scheduling(clock: FakeClock, runner: Recorder) -> None:
-    """Une interface défaillante ne doit pas laisser une tâche sans surveillance."""
+    """A failing interface must not leave a task unmonitored."""
 
     def boom(_: object) -> None:
-        raise RuntimeError("interface indisponible")
+        raise RuntimeError("interface unavailable")
 
     scheduler = Scheduler(clock=clock, runner=runner, on_tick=boom, on_reminder=boom)
     scheduler.arm(Action.SLEEP, 5, reminder_minutes=1)

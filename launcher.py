@@ -1,8 +1,8 @@
-"""Point d'entrée pour PyInstaller.
+"""Entry point for PyInstaller.
 
-Un script d'amorçage distinct est nécessaire : PyInstaller n'accepte pas de
-module lancé par `-m`, et `src/auto_shutdown/__main__.py` utilise des imports
-relatifs qui exigent que le paquet soit chargé comme tel.
+A separate bootstrap script is needed: PyInstaller does not accept a module
+launched with `-m`, and `src/auto_shutdown/__main__.py` uses relative imports
+that require the package to be loaded as such.
 """
 
 import sys

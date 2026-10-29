@@ -1,41 +1,40 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="96" alt="Icône Auto Shutdown">
+  <img src="docs/images/icon.png" width="96" alt="Auto Shutdown icon">
 </p>
 
 <h1 align="center">Auto Shutdown</h1>
 
 <p align="center">
-  Veille, veille prolongée, arrêt ou verrouillage différé sous Windows —<br>
-  <strong>sans redéclenchement intempestif au retour de veille.</strong>
+  Delayed sleep, hibernation, shutdown or lock on Windows —<br>
+  <strong>without spurious re-triggering when the machine resumes from sleep.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white" alt="Windows 10 | 11">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13">
-  <img src="https://img.shields.io/badge/d%C3%A9pendances-aucune-2ea44f" alt="Aucune dépendance">
-  <img src="https://img.shields.io/badge/licence-MIT-blue" alt="Licence MIT">
+  <img src="https://img.shields.io/badge/dependencies-none-2ea44f" alt="No dependencies">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
 
 <p align="center">
-  <img src="docs/images/config.png" width="330" alt="Fenêtre de configuration">
+  <img src="docs/images/config-en.png" width="330" alt="Configuration window">
   &nbsp;&nbsp;
-  <img src="docs/images/reminder.png" width="375" alt="Fenêtre de rappel avant l'échéance">
+  <img src="docs/images/reminder-en.png" width="375" alt="Reminder window shown before the deadline">
 </p>
 
-Beaucoup d'utilitaires de ce genre relancent leur action au retour de veille et
-renvoient la machine dormir quelques secondes après chaque réveil. Celui-ci est
-conçu pour que cela n'arrive pas.
+Many utilities of this kind run their action again when the machine resumes from
+sleep, sending it back to sleep a few seconds after every wake-up. This one is
+designed so that it cannot happen.
 
-- ⏱️ **Six actions** : veille prolongée, veille, arrêt, redémarrage, fermeture de
-  session, verrouillage.
-- 🔔 **Rappel avant l'échéance**, avec annulation ou report de 5 à 30 minutes.
-- 🛡️ **Fiable après une veille** : base de temps monotone, désarmement à la
-  reprise, détection des décomptes interrompus
-  ([détails](docs/fiabilite.md)).
-- 📋 **Journal horodaté** de chaque armement, annulation et transition
-  d'alimentation.
-- 🪶 **Aucune dépendance d'exécution** — `ctypes` et `tkinter` suffisent ;
-  exécutable autonome d'environ 12 Mo.
+- ⏱️ **Six actions**: hibernate, sleep, shut down, restart, sign out, lock.
+- 🔔 **Reminder before the deadline**, with the choice to cancel or postpone by 5
+  to 30 minutes.
+- 🛡️ **Reliable across sleep**: monotonic time base, disarming on resume,
+  detection of interrupted countdowns
+  ([details](docs/reliability.md)).
+- 📋 **Timestamped log** of every arming, cancellation and power transition.
+- 🪶 **No runtime dependency** — `ctypes` and `tkinter` are enough; standalone
+  executable of about 12 MB.
 
 ## Installation
 
@@ -46,198 +45,210 @@ conçu pour que cela n'arrive pas.
 > uv run auto-shutdown
 ```
 
-## Exécutable autonome
+## Standalone executable
 
 ```console
 > .\build.ps1
 ```
 
-Le script régénère l'icône, puis assemble `dist\auto-shutdown.exe` — environ
-12 Mo, sans console, ne dépendant d'aucun Python installé sur la machine cible.
+The script regenerates the icon, then builds `dist\auto-shutdown.exe` — about
+12 MB, no console, and independent of any Python installed on the target
+machine.
 
 ```console
 > .\build.ps1 -OneDir
 ```
 
-Produit un dossier plutôt qu'un fichier unique. Le démarrage est nettement plus
-rapide : en `--onefile`, le bootloader réextrait l'archive dans `%TEMP%` à chaque
-lancement. Pour un programme lancé une fois par session, le fichier unique reste
-le plus pratique ; `-OneDir` vaut le détour si le délai gêne.
+Produces a folder instead of a single file. Startup is noticeably faster: with
+`--onefile`, the bootloader re-extracts the archive into `%TEMP%` on every
+launch. For a program started once per session, the single file remains the most
+convenient; `-OneDir` is worth it if the delay is a nuisance.
 
-L'icône est produite par `tools/make_ico.py`, en Python pur, sans Pillow : un
-disque ardoise portant le symbole de mise en marche, décliné en 16, 32, 48 et
-256 pixels. Le fichier `assets/auto-shutdown.ico` est versionné, la construction
-n'a donc pas besoin de l'outil. Il sert à la fois d'icône de l'exécutable et
-d'icône des fenêtres.
+The icon is produced by `tools/make_ico.py`, in pure Python, without Pillow: a
+slate disc bearing the power symbol, in 16, 32, 48 and 256 pixel sizes. The
+`assets/auto-shutdown.ico` file is versioned, so the build does not need the
+tool. It serves both as the executable's icon and as the windows' icon.
 
-### Lancement au démarrage de la session
+### Launching at sign-in
 
-Placer un raccourci vers l'exécutable dans le dossier de démarrage, que l'on
-ouvre par `Win+R` puis `shell:startup`. En PowerShell :
+Put a shortcut to the executable in the startup folder, which you open with
+`Win+R` then `shell:startup`. In PowerShell:
 
 ```powershell
-$lien = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Auto Shutdown.lnk"
-$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lien)
+$link = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Auto Shutdown.lnk"
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
 $s.TargetPath = (Resolve-Path .\dist\auto-shutdown.exe).Path
 $s.Arguments = '--minimized'
 $s.Save()
 ```
 
-`--minimized` est important ici : sans lui, la fenêtre de configuration
-s'ouvrirait à chaque ouverture de session. Avec, le programme se contente de
-rejoindre la zone de notification.
+`--minimized` matters here: without it, the configuration window would open at
+every sign-in. With it, the program simply joins the notification area.
 
-Une seule instance peut tourner à la fois : un mutex nommé fait échouer le second
-lancement avec le code de retour 2, sans fenêtre d'erreur.
+Only one instance can run at a time: a named mutex makes a second launch fail
+with exit code 2, without an error window.
 
 ### Options
 
-| Option | Effet |
+| Option | Effect |
 |---|---|
-| `--minimized` | démarre sans ouvrir la fenêtre de configuration |
-| `--verbose` | journalisation détaillée, également sur la console |
-| `--version` | affiche le numéro de version et quitte |
+| `--minimized` | starts without opening the configuration window |
+| `--verbose` | detailed logging, also on the console |
+| `--version` | prints the version number and exits |
 
-## Utilisation
+## Usage
 
-Au lancement, la fenêtre de configuration s'ouvre — sauf avec `--minimized`. Sa
-fermeture n'arrête pas le programme : celui-ci continue de vivre dans la zone de
-notification, et l'entrée `Quitter` du menu contextuel est le seul moyen d'y
-mettre fin.
+At launch, the configuration window opens — unless `--minimized` is given.
+Closing it does not stop the program: it keeps living in the notification area,
+and the `Quit` entry of the context menu is the only way to end it.
 
-Le numéro de version est rappelé en bas de la fenêtre de configuration, afin de
-lever toute ambiguïté sur ce qui tourne réellement — sources ou exécutable.
+The version number is shown at the bottom of the configuration window, to remove
+any ambiguity about what is actually running — sources or executable.
 
-La couleur de l'icône donne l'état d'un coup d'œil :
+The icon color gives the state at a glance:
 
-| Icône | Couleur | État |
+| Icon | Color | State |
 |:---:|---|---|
-| <img src="docs/images/state-idle.png" width="16" alt=""> | Gris-bleu | aucune tâche programmée |
-| <img src="docs/images/state-armed.png" width="16" alt=""> | Orange | tâche armée, décompte en cours |
-| <img src="docs/images/state-reminding.png" width="16" alt=""> | Rouge | échéance proche, rappel affiché |
+| <img src="docs/images/state-idle.png" width="16" alt=""> | Blue-gray | no task scheduled |
+| <img src="docs/images/state-armed.png" width="16" alt=""> | Orange | task armed, countdown running |
+| <img src="docs/images/state-reminding.png" width="16" alt=""> | Red | deadline close, reminder shown |
 
-- **Clic gauche** ouvre la fenêtre de configuration : action, délai, rappel.
-- **Clic droit** ouvre le menu : reporter, annuler, ouvrir le journal, quitter.
+- **Left click** opens the configuration window: action, delay, reminder.
+- **Right click** opens the menu: postpone, cancel, open the log, quit.
 
 <p align="center">
-  <img src="docs/images/tray-menu.png" width="340" alt="Menu contextuel de la zone de notification">
+  <img src="docs/images/tray-menu-en.png" width="340" alt="Notification-area context menu">
 </p>
 
-Le rappel s'affiche l'avance choisie avant l'échéance et propose d'annuler, de
-laisser faire, ou de reporter de **5, 10, 15 ou 30 minutes**. Le sous-menu
-`Reporter de` du clic droit offre les mêmes durées, y compris avant que le
-rappel ne se déclenche.
+The reminder appears the chosen lead time before the deadline and offers to
+cancel, to let it run, or to postpone by **5, 10, 15 or 30 minutes**. The
+`Postpone by` submenu of the right-click menu offers the same durations, even
+before the reminder fires.
 
-Un report reconduit le rappel avec la même avance, sauf si celle-ci ne tient
-plus dans le nouveau délai : reporter de 5 minutes avec un rappel réglé à
-5 minutes le ferait tomber sur-le-champ, il est donc simplement omis.
+A postponement renews the reminder with the same lead time, unless that no
+longer fits in the new delay: postponing by 5 minutes with a reminder set to 5
+minutes would make it fire on the spot, so it is simply skipped.
 
-Les durées proposées sont définies à un seul endroit, `POSTPONE_CHOICES` dans
-`config.py` ; les deux interfaces s'y alimentent.
+The offered durations are defined in a single place, `POSTPONE_CHOICES` in
+`config.py`; both interfaces draw from it.
 
-### Actions disponibles
+### Available actions
 
-`Mettre en veille prolongée` · `Mettre en veille` · `Arrêter` · `Redémarrer` ·
-`Fermer la session` · `Verrouiller l'écran`
+`Hibernate` · `Sleep` · `Shut down` · `Restart` · `Sign out` · `Lock the screen`
 
-### Journal
+### Languages
 
-Chaque armement, annulation, déclenchement et transition d'alimentation est
-horodaté dans :
+The interface follows the Windows display language: the first supported
+language among the user's preferred display languages (Settings > Time &
+language). English and French are currently available; anything else falls back
+to English. Logs, command-line help and error messages are always in English.
+
+To add a language, create `src/auto_shutdown/locales/<code>.py` with a
+`MESSAGES` dict that has the same keys as `locales/en.py`, then register it in
+`CATALOGS` in `src/auto_shutdown/i18n.py`. `tests/test_i18n.py` checks that the
+keys and placeholders match.
+
+### Log
+
+Every arming, cancellation, trigger and power transition is timestamped in:
 
 ```
 %LOCALAPPDATA%\auto-shutdown\auto-shutdown.log
 ```
 
-C'est ce qui permet de répondre après coup à la question que les utilitaires de
-ce genre laissent en général sans réponse : *qu'est-ce qui a endormi la machine,
-et à quelle heure ?* Le menu du tray l'ouvre directement.
+This is what makes it possible to answer, after the fact, the question these
+utilities usually leave unanswered: *what put the machine to sleep, and at what
+time?* The tray menu opens it directly.
 
 ### Configuration
 
-Les réglages sont dans `%APPDATA%\auto-shutdown\config.json`, modifiable à la
-main. Un fichier corrompu ou incomplet n'empêche jamais le démarrage : les
-valeurs manquantes retombent sur leurs défauts.
+Settings are in `%APPDATA%\auto-shutdown\config.json`, which can be edited by
+hand. A corrupted or incomplete file never prevents startup: missing values fall
+back to their defaults.
 
-| Clé | Défaut | Rôle |
+| Key | Default | Role |
 |---|---|---|
-| `action` | `HIBERNATE` | action exécutée à l'échéance |
-| `delay_minutes` | `30` | délai depuis l'armement |
-| `reminder_enabled` | `true` | affichage du rappel |
-| `reminder_minutes` | `5` | avance du rappel |
-| `input_quiet_seconds` | `3.0` | calme d'entrée exigé avant de suspendre |
-| `input_quiet_timeout` | `30.0` | plafond d'attente de ce calme |
-| `stall_threshold_seconds` | `60.0` | seuil de détection d'un décompte interrompu |
+| `action` | `HIBERNATE` | action run at the deadline |
+| `delay_minutes` | `30` | delay since arming |
+| `reminder_enabled` | `true` | whether the reminder is shown |
+| `reminder_minutes` | `5` | reminder lead time |
+| `input_quiet_seconds` | `3.0` | input quiet period required before suspending |
+| `input_quiet_timeout` | `30.0` | cap on the wait for that quiet period |
+| `stall_threshold_seconds` | `60.0` | threshold for detecting an interrupted countdown |
 
 ## Architecture
 
 ```
 src/auto_shutdown/
-├── winapi.py     liaison ctypes : fenêtres, zone de notification, alimentation
-├── power.py      actions et précautions qui les entourent
-├── scheduler.py  décompte, échéance, règles de fiabilité
-├── tray.py       icône, menu, boucle de messages Windows
-├── ui.py         fenêtres tkinter : configuration et rappel
-├── config.py     réglages persistés
-├── log.py        journal tournant
-└── app.py        assemblage et threads
+├── winapi.py     ctypes binding: windows, notification area, power
+├── power.py      actions and the precautions around them
+├── scheduler.py  countdown, deadline, reliability rules
+├── tray.py       icon, menu, Windows message loop
+├── ui.py         tkinter windows: configuration and reminder
+├── config.py     persisted settings
+├── i18n.py       interface language detection and translation lookup
+├── locales/      one text catalog per language
+├── log.py        rotating log
+└── app.py        wiring and threads
 
-assets/          icône versionnée
-docs/images/     captures d'écran du README
-tools/           génération de l'icône et des captures
-launcher.py      point d'entrée pour PyInstaller
-build.ps1        construction de l'exécutable
+assets/          versioned icon
+docs/images/     README screenshots
+tools/           icon and screenshot generation
+launcher.py      entry point for PyInstaller
+build.ps1        executable build
 ```
 
-Trois threads : la boucle tkinter dans le thread principal, la boucle de
-messages Windows dans un thread dédié, le décompte dans un troisième. Tout ce
-qui touche à tkinter est réacheminé vers le thread principal ; les deux autres
-composants acceptent d'être sollicités depuis n'importe quel thread.
+Three threads: the tkinter loop in the main thread, the Windows message loop in
+a dedicated thread, the countdown in a third. Everything that touches tkinter is
+rerouted to the main thread; the other two components accept being called from
+any thread.
 
-Une seule fenêtre reçoit à la fois les événements de la zone de notification et
-les notifications d'alimentation, ce qui supprime tout besoin de synchronisation
-entre les deux.
+A single window receives both the notification-area events and the power
+notifications, which removes any need for synchronization between the two.
 
-## Versionnage
+## Versioning
 
-Le projet suit le [versionnage sémantique](https://semver.org/lang/fr/)
-`MAJEUR.MINEUR.CORRECTIF`. Les évolutions sont consignées dans
-[CHANGELOG.md](CHANGELOG.md), qui détaille aussi ce que recouvre chaque rang.
+The project follows [Semantic Versioning](https://semver.org/)
+`MAJOR.MINOR.PATCH`. Changes are recorded in [CHANGELOG.md](CHANGELOG.md), which
+also details what each rank covers.
 
-Le numéro vit à un seul endroit qui fasse foi à l'exécution,
-`src/auto_shutdown/__init__.py`, car les métadonnées d'installation ne sont pas
-lisibles depuis un exécutable PyInstaller. `pyproject.toml` porte nécessairement
-la même valeur pour la distribution : un test refuse que les deux divergent, et
-exige une entrée au journal des modifications pour la version courante.
+The number lives in a single place that is authoritative at runtime,
+`src/auto_shutdown/__init__.py`, because installation metadata is not readable
+from a PyInstaller executable. `pyproject.toml` necessarily carries the same
+value for the distribution: a test refuses to let the two diverge, and requires
+a changelog entry for the current version.
 
-Publier une version se résume donc à modifier `__version__`, reporter la valeur
-dans `pyproject.toml`, ajouter la section correspondante au journal, puis
-reconstruire.
+Publishing a release therefore boils down to changing `__version__`, copying the
+value into `pyproject.toml`, adding the matching section to the changelog, then
+rebuilding.
 
-## Développement
+## Development
 
 ```console
 > uv sync --all-groups
-> uv run pytest          # suite de tests
-> uv run ruff check .    # analyse statique
-> uv run ruff format .   # formatage
+> uv run pytest          # test suite
+> uv run ruff check .    # static analysis
+> uv run ruff format .   # formatting
 ```
 
-Les tests pilotent l'ordonnanceur avec une horloge simulée et un exécuteur de
-remplacement : la suite complète s'exécute en une fraction de seconde, sans
-jamais endormir la machine. Les scénarios reproduisent les enchaînements relevés
-dans le journal Windows (voir [docs/fiabilite.md](docs/fiabilite.md)).
+The tests drive the scheduler with a simulated clock and a stand-in executor:
+the whole suite runs in a fraction of a second, without ever putting the machine
+to sleep. The scenarios reproduce the sequences found in the Windows event log
+(see [docs/reliability.md](docs/reliability.md)).
 
-Les captures du README sont produites à partir des vraies fenêtres, alimentées
-par un état simulé. Après une modification de l'interface :
+The README screenshots are produced from the real windows, fed with a simulated
+state. After changing the interface:
 
 ```console
 > uv run --with pillow python tools/screenshots.py
 ```
 
-Ne pas toucher à la souris pendant l'exécution : le script ouvre le menu
-contextuel sous le pointeur.
+This captures in English by default; `--language fr` captures the French
+interface instead.
 
-## Licence
+Do not touch the mouse while it runs: the script opens the context menu under
+the pointer.
+
+## License
 
 MIT.

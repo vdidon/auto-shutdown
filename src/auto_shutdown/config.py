@@ -1,4 +1,4 @@
-"""Configuration persistée dans le profil de l'utilisateur."""
+"""Configuration persisted in the user's profile."""
 
 from __future__ import annotations
 
@@ -11,36 +11,36 @@ from typing import Any, Final
 
 APP_NAME = "auto-shutdown"
 
-#: Icône appliquée aux fenêtres, et à l'exécutable lors de la construction.
+#: Icon applied to windows, and to the executable at build time.
 ICON_FILE = "auto-shutdown.ico"
 
-#: Durées de report proposées, en minutes. Source unique : la fenêtre de rappel
-#: et le menu de la zone de notification s'en servent toutes deux.
+#: Postpone durations offered, in minutes. Single source: the reminder window
+#: and the notification-area menu both use it.
 POSTPONE_CHOICES: Final = (5, 10, 15, 30)
 
-#: Bornes du délai, en minutes. Un délai nul déclencherait l'action à l'instant
-#: même où la tâche est armée, sans laisser le temps d'annuler.
+#: Delay bounds, in minutes. A zero delay would fire the action at the very
+#: moment the task is armed, leaving no time to cancel.
 MIN_DELAY_MINUTES = 1
 MAX_DELAY_MINUTES = 24 * 60 * 7
 
 
 def config_dir() -> Path:
-    """Répertoire de configuration (`%APPDATA%\\auto-shutdown`)."""
+    """Configuration directory (`%APPDATA%\\auto-shutdown`)."""
     base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     return Path(base) / APP_NAME
 
 
 def data_dir() -> Path:
-    """Répertoire des données volatiles, journal compris."""
+    """Directory for volatile data, including the log."""
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / APP_NAME
 
 
 def asset_path(name: str) -> Path:
-    """Chemin d'une ressource, qu'on tourne depuis les sources ou un exécutable.
+    """Path of an asset, whether running from source or from an executable.
 
-    En mode `--onefile`, PyInstaller extrait les ressources embarquées dans un
-    répertoire temporaire dont le chemin est publié par `sys._MEIPASS`.
+    In `--onefile` mode, PyInstaller extracts the bundled assets into a
+    temporary directory whose path is published by `sys._MEIPASS`.
     """
     bundled = getattr(sys, "_MEIPASS", None)
     if bundled is not None:
@@ -50,31 +50,31 @@ def asset_path(name: str) -> Path:
 
 @dataclass(slots=True)
 class Config:
-    """Réglages de l'application.
+    """Application settings.
 
-    `action` est le nom d'un membre de `power.Action`. Il est stocké sous forme
-    de chaîne pour que le fichier reste lisible et modifiable à la main.
+    `action` is the name of a `power.Action` member. It is stored as a string
+    so the file stays readable and hand-editable.
     """
 
     action: str = "HIBERNATE"
     delay_minutes: int = 30
 
-    #: Rappel affiché avant l'échéance, avec possibilité d'annuler ou de reporter.
+    #: Reminder shown before the deadline, with the option to cancel or postpone.
     reminder_enabled: bool = True
     reminder_minutes: int = 5
 
-    #: Durée sans entrée clavier/souris exigée avant de suspendre la machine.
-    #: Sur un système où la souris est armée pour le réveil, suspendre pendant
-    #: qu'un mouvement est encore en cours provoque un réveil immédiat.
+    #: Time without keyboard/mouse input required before suspending the machine.
+    #: On a system where the mouse is armed as a wake source, suspending while a
+    #: movement is still in progress causes an immediate wake-up.
     input_quiet_seconds: float = 3.0
 
-    #: Plafond d'attente du calme d'entrée : au-delà, l'action est exécutée
-    #: malgré tout, l'utilisateur ayant déjà eu le rappel pour annuler.
+    #: Maximum wait for input to go quiet: beyond it, the action is executed
+    #: anyway, since the user already had the reminder to cancel.
     input_quiet_timeout: float = 30.0
 
-    #: Écart entre deux passages du décompte au-delà duquel celui-ci est jugé
-    #: interrompu — signe que la machine a été suspendue. Une échéance franchie
-    #: pendant cette interruption est annulée plutôt qu'exécutée.
+    #: Gap between two countdown polls beyond which the countdown is deemed
+    #: interrupted — a sign that the machine was suspended. A deadline crossed
+    #: during that interruption is cancelled rather than executed.
     stall_threshold_seconds: float = 60.0
 
     def path(self) -> Path:
@@ -82,10 +82,10 @@ class Config:
 
     @classmethod
     def load(cls) -> Config:
-        """Relit la configuration ; retombe sur les valeurs par défaut si besoin.
+        """Reload the configuration; fall back to defaults if needed.
 
-        Un fichier corrompu ou partiel ne doit jamais empêcher le démarrage :
-        les clés inconnues sont ignorées et les manquantes gardent leur défaut.
+        A corrupt or partial file must never prevent startup: unknown keys are
+        ignored and missing ones keep their default.
         """
         path = config_dir() / "config.json"
         if not path.is_file():
@@ -102,21 +102,21 @@ class Config:
     def save(self) -> None:
         path = self.path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Écriture puis remplacement atomique : une coupure ne laisse jamais
-        # un fichier de configuration tronqué.
+        # Write then atomic replace: a power cut never leaves a truncated
+        # configuration file.
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
         tmp.replace(path)
 
     def clamped_delay(self) -> int:
-        """Délai ramené dans les bornes acceptables."""
+        """Delay clamped to the acceptable bounds."""
         return max(MIN_DELAY_MINUTES, min(MAX_DELAY_MINUTES, int(self.delay_minutes)))
 
     def effective_reminder_minutes(self) -> int:
-        """Avance du rappel, jamais supérieure ou égale au délai lui-même.
+        """Reminder lead time, never greater than or equal to the delay itself.
 
-        Un rappel programmé au-delà de l'échéance ne se déclencherait pas ;
-        un rappel exactement à l'échéance ne laisserait aucun temps de réaction.
+        A reminder scheduled beyond the deadline would never fire; a reminder
+        exactly at the deadline would leave no time to react.
         """
         if not self.reminder_enabled:
             return 0

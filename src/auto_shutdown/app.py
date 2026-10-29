@@ -1,14 +1,13 @@
-"""Assemblage des trois composants et de leurs threads.
+"""Wiring of the three components and their threads.
 
-Répartition des rôles :
+Division of roles:
 
-- thread principal : boucle tkinter (`Ui.run`) ;
-- thread `tray` : fenêtre Windows, menu et notifications d'alimentation ;
-- thread `scheduler` : décompte et déclenchement.
+- main thread: tkinter loop (`Ui.run`);
+- `tray` thread: Windows window, menu and power notifications;
+- `scheduler` thread: countdown and triggering.
 
-Tout ce qui touche à tkinter est réacheminé vers le thread principal par
-`Ui.call`. Les deux autres composants sont conçus pour être sollicités depuis
-n'importe quel thread.
+Anything touching tkinter is rerouted to the main thread by `Ui.call`. The
+other two components are designed to be called from any thread.
 """
 
 from __future__ import annotations
@@ -23,10 +22,11 @@ from . import __version__, winapi
 from . import log as log_module
 from . import tray as tray_module
 from .config import Config
+from .i18n import detect_language, set_language, tr
 from .power import Action
 from .scheduler import CancelReason, Scheduler, Snapshot, State
 from .tray import Tray, TrayCallbacks
-from .ui import Ui, UiCallbacks, format_duration
+from .ui import Ui, UiCallbacks, action_label, format_duration, status_text
 
 log = logging.getLogger(__name__)
 
@@ -34,10 +34,10 @@ MUTEX_NAME = "Local\\AutoShutdownSingleInstance"
 
 
 def _enable_dpi_awareness() -> None:
-    """Rend l'interface nette sur les écrans à forte densité.
+    """Keep the interface sharp on high-density displays.
 
-    Sans cela, Windows étire l'interface et le texte devient flou. L'échec de
-    l'appel est sans gravité : seule l'esthétique en pâtit.
+    Without this, Windows stretches the interface and the text becomes blurry.
+    Failure of the call is harmless: only the looks suffer.
     """
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
@@ -45,11 +45,11 @@ def _enable_dpi_awareness() -> None:
         try:
             ctypes.windll.user32.SetProcessDPIAware()
         except (AttributeError, OSError):
-            log.debug("Impossible d'activer la prise en charge du DPI")
+            log.debug("Unable to enable DPI awareness")
 
 
 class Application:
-    """Cycle de vie complet de l'application."""
+    """Full lifecycle of the application."""
 
     def __init__(self, config: Config, *, open_config: bool = True) -> None:
         self._config = config
@@ -92,23 +92,23 @@ class Application:
         )
         self._tray_thread = threading.Thread(target=self._tray.run, name="tray", daemon=True)
 
-    # -- cycle de vie ------------------------------------------------------
+    # -- lifecycle ---------------------------------------------------------
 
     def run(self) -> int:
         self._scheduler.start()
         self._tray_thread.start()
         if not self._tray.wait_ready():
-            log.error("La zone de notification n'a pas répondu ; arrêt")
+            log.error("The notification area did not respond; stopping")
             return 1
 
         self._refresh_tray(self._scheduler.snapshot())
         if self._open_config:
-            # Planifié plutôt qu'appelé : la fenêtre doit naître dans la boucle
-            # tkinter, que `run` démarre juste après.
+            # Scheduled rather than called: the window must be created inside
+            # the tkinter loop, which `run` starts right after.
             self._ui.call(self._ui.show_config)
-        log.info("Application démarrée")
+        log.info("Application started")
         self._ui.run()
-        log.info("Application arrêtée")
+        log.info("Application stopped")
         return 0
 
     def quit(self) -> None:
@@ -119,14 +119,18 @@ class Application:
         self._tray.shutdown()
         self._ui.quit()
 
-    # -- commandes ---------------------------------------------------------
+    # -- commands ----------------------------------------------------------
 
     def _arm(self, action: Action, delay_minutes: int, reminder_minutes: int) -> None:
         snapshot = self._scheduler.arm(action, delay_minutes, reminder_minutes)
         self._refresh_tray(snapshot)
         self._tray.notify(
-            "Tâche programmée",
-            f"{action.value} dans {format_duration(snapshot.remaining)}.",
+            tr("notify.armed.title"),
+            tr(
+                "notify.armed.body",
+                action=action.label,
+                remaining=format_duration(snapshot.remaining),
+            ),
         )
 
     def _cancel(self) -> None:
@@ -139,22 +143,22 @@ class Application:
         if snapshot is None:
             return
         self._refresh_tray(snapshot)
-        self._tray.notify("Tâche reportée", f"Nouvelle échéance dans {minutes} minutes.")
+        self._tray.notify(
+            tr("notify.postponed.title"), tr("notify.postponed.body", minutes=minutes)
+        )
 
     def _open_log(self) -> None:
         path = log_module.log_path()
         try:
             os.startfile(path)
         except OSError:
-            log.exception("Impossible d'ouvrir le journal %s", path)
+            log.exception("Unable to open the log file %s", path)
 
     def _query_state(self) -> tuple[bool, str]:
         snapshot = self._scheduler.snapshot()
-        if snapshot.armed and snapshot.action is not None:
-            return True, f"{snapshot.action.value} dans {format_duration(snapshot.remaining)}"
-        return False, "Aucune tâche programmée"
+        return snapshot.armed, status_text(snapshot)
 
-    # -- réactions à l'ordonnanceur ----------------------------------------
+    # -- reactions to the scheduler ----------------------------------------
 
     def _on_tick(self, snapshot: Snapshot) -> None:
         self._refresh_tray(snapshot)
@@ -163,39 +167,35 @@ class Application:
     def _on_reminder(self, snapshot: Snapshot) -> None:
         self._ui.call(self._ui.show_reminder, snapshot)
         self._tray.notify(
-            "Rappel",
-            f"{snapshot.action.value if snapshot.action else 'Action'} dans "
-            f"{format_duration(snapshot.remaining)}.",
+            tr("notify.reminder.title"),
+            tr(
+                "notify.reminder.body",
+                action=action_label(snapshot),
+                remaining=format_duration(snapshot.remaining),
+            ),
             warning=True,
         )
 
     def _on_fired(self, action: Action) -> None:
         self._ui.call(self._ui.close_reminder)
         self._refresh_tray(self._scheduler.snapshot())
-        log.info("Déclenchement de %s", action.name)
+        log.info("Triggering %s", action.name)
 
     def _on_cancelled(self, reason: CancelReason) -> None:
         self._ui.call(self._ui.close_reminder)
         self._ui.call(self._ui.refresh)
         self._refresh_tray(self._scheduler.snapshot())
-        # Rendre l'annulation visible : c'est précisément ce que l'utilisateur
-        # doit pouvoir constater, plutôt que subir un ré-endormissement
-        # inexpliqué.
-        messages = {
-            CancelReason.RESUME: (
-                "La machine est sortie de veille : la tâche programmée a été "
-                "annulée pour éviter un nouveau cycle de veille."
-            ),
-            CancelReason.STALL: (
-                "Le décompte a été interrompu, signe que la machine a été "
-                "suspendue. La tâche a été annulée par sécurité."
-            ),
+        # Make the cancellation visible: that is precisely what the user must
+        # be able to notice, rather than suffer an unexplained return to sleep.
+        keys = {
+            CancelReason.RESUME: "notify.cancelled.resume",
+            CancelReason.STALL: "notify.cancelled.stall",
         }
-        message = messages.get(reason)
-        if message is not None:
-            self._tray.notify("Tâche annulée", message, warning=True)
+        key = keys.get(reason)
+        if key is not None:
+            self._tray.notify(tr("notify.cancelled.title"), tr(key), warning=True)
 
-    # -- présentation ------------------------------------------------------
+    # -- presentation ------------------------------------------------------
 
     def _refresh_tray(self, snapshot: Snapshot) -> None:
         if snapshot.state is State.REMINDING:
@@ -205,15 +205,10 @@ class Application:
         else:
             color = tray_module.COLOR_IDLE
 
-        if snapshot.armed and snapshot.action is not None:
-            tooltip = (
-                f"Auto Shutdown\n{snapshot.action.value} dans {format_duration(snapshot.remaining)}"
-            )
-        else:
-            tooltip = "Auto Shutdown\nAucune tâche programmée"
+        tooltip = f"Auto Shutdown\n{status_text(snapshot)}"
 
-        # L'ordonnanceur bat quatre fois par seconde ; l'infobulle ne change
-        # qu'à la seconde. Filtrer évite autant d'allers-retours vers le shell.
+        # The scheduler ticks four times per second; the tooltip only changes
+        # once per second. Filtering avoids that many round trips to the shell.
         if tooltip == self._last_tooltip:
             return
         self._last_tooltip = tooltip
@@ -221,33 +216,32 @@ class Application:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Point d'entrée."""
+    """Entry point."""
     parser = argparse.ArgumentParser(
         prog="auto-shutdown",
-        description="Programme une mise en veille, un arrêt ou un verrouillage différé.",
+        description="Schedule a delayed sleep, hibernate, shutdown or lock.",
     )
     parser.add_argument("--version", action="version", version=f"auto-shutdown {__version__}")
-    parser.add_argument(
-        "--verbose", action="store_true", help="journalisation détaillée sur la console"
-    )
+    parser.add_argument("--verbose", action="store_true", help="detailed logging to the console")
     parser.add_argument(
         "--minimized",
         action="store_true",
-        help="démarre dans la zone de notification, sans ouvrir la fenêtre de configuration "
-        "(destiné au lancement automatique à l'ouverture de session)",
+        help="start in the notification area without opening the configuration window "
+        "(meant for automatic launch at sign-in)",
     )
     args = parser.parse_args(argv)
 
     path = log_module.setup(verbose=args.verbose)
-    # Première ligne de chaque session : sans elle, un journal remonté par un
-    # utilisateur ne dit pas quelle version l'a produit.
-    log.info("auto-shutdown %s — journal : %s", __version__, path)
+    # First line of every session: without it, a log reported by a user does
+    # not say which version produced it.
+    log.info("auto-shutdown %s — log: %s", __version__, path)
 
     mutex = winapi.acquire_single_instance_mutex(MUTEX_NAME)
     if mutex is None:
-        log.error("Une autre instance est déjà en cours d'exécution")
+        log.error("Another instance is already running")
         return 2
 
+    set_language(detect_language())
     _enable_dpi_awareness()
     winapi.enable_shutdown_privilege()
 

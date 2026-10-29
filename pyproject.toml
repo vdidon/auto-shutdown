@@ -1,7 +1,7 @@
 [project]
 name = "auto-shutdown"
 version = "0.1.0"
-description = "Programmation fiable d'une mise en veille, d'un arrêt ou d'un verrouillage différé sous Windows"
+description = "Reliable scheduling of a delayed sleep, hibernate, shutdown or lock on Windows"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -18,8 +18,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Utilities",
 ]
-# Aucune dépendance d'exécution : ctypes et tkinter font partie de la
-# bibliothèque standard. L'exécutable produit reste donc léger.
+# No runtime dependencies: ctypes and tkinter are part of the standard
+# library, so the produced executable stays lightweight.
 dependencies = []
 
 [project.urls]
@@ -32,7 +32,7 @@ Changelog = "https://github.com/vdidon/auto-shutdown/blob/main/CHANGELOG.md"
 auto-shutdown = "auto_shutdown.app:main"
 
 [project.gui-scripts]
-# Variante sans console, adaptée à un lancement au démarrage de session.
+# Console-less variant, suited to launching at sign-in.
 auto-shutdown-tray = "auto_shutdown.app:main"
 
 [dependency-groups]
@@ -55,9 +55,9 @@ select = [
     "PIE", "PT", "RET", "SIM", "TID", "ARG", "PTH", "PL", "RUF",
 ]
 ignore = [
-    # La couche ctypes reproduit la casse et les signatures de l'API Windows.
+    # The ctypes layer mirrors the casing and signatures of the Windows API.
     "N803", "N806",
-    # Les messages d'exception littéraux restent lisibles tels quels.
+    # Literal exception messages stay readable as they are.
     "EM101", "EM102",
     "ISC001",
 ]
@@ -71,6 +71,6 @@ addopts = "-q --strict-markers"
 
 [tool.coverage.run]
 source = ["auto_shutdown"]
-# Les modules d'interface exigent une session Windows interactive : ils sont
-# vérifiés manuellement, pas par la suite automatisée.
+# The interface modules require an interactive Windows session: they are
+# checked manually, not by the automated suite.
 omit = ["*/tray.py", "*/ui.py", "*/__main__.py"]

@@ -1,14 +1,13 @@
-"""Icône de notification et boucle de messages Windows.
+"""Notification-area icon and Windows message loop.
 
-Une seule fenêtre, donc une seule boucle de messages, reçoit à la fois les
-événements de la zone de notification et les notifications d'alimentation
-(`WM_POWERBROADCAST`). Aucune synchronisation n'est nécessaire entre les deux :
-un retour de veille et un clic sur le menu ne peuvent pas être traités
-simultanément.
+A single window, hence a single message loop, receives both the notification
+area events and the power notifications (`WM_POWERBROADCAST`). No
+synchronization is needed between the two: a resume from sleep and a click on
+the menu cannot be handled simultaneously.
 
-La fenêtre est délibérément une fenêtre ordinaire jamais affichée plutôt qu'une
-fenêtre `HWND_MESSAGE` : ces dernières ne peuvent pas passer au premier plan, ce
-qui empêche le menu contextuel de se refermer quand on clique ailleurs.
+The window is deliberately an ordinary, never-shown window rather than an
+`HWND_MESSAGE` window: the latter cannot be brought to the foreground, which
+prevents the context menu from closing when the user clicks elsewhere.
 """
 
 from __future__ import annotations
@@ -22,24 +21,25 @@ from dataclasses import dataclass
 
 from . import winapi
 from .config import POSTPONE_CHOICES
+from .i18n import tr
 
 log = logging.getLogger(__name__)
 
 WINDOW_CLASS = "AutoShutdownTrayWindow"
 TRAY_ICON_ID = 1
 
-# Identifiants des entrées du menu contextuel.
+# Context menu entry identifiers.
 CMD_CONFIGURE = 1
 CMD_CANCEL = 2
 CMD_OPEN_LOG = 4
 CMD_QUIT = 5
 
-#: Base des identifiants du sous-menu de report : l'entrée d'indice `i` porte
-#: l'identifiant `CMD_POSTPONE_BASE + i`. Choisie assez haut pour ne jamais
-#: entrer en collision avec les commandes fixes ci-dessus.
+#: Base of the postpone submenu identifiers: the entry at index `i` gets the
+#: identifier `CMD_POSTPONE_BASE + i`. Chosen high enough never to collide with
+#: the fixed commands above.
 CMD_POSTPONE_BASE = 100
 
-#: Couleurs de l'icône selon l'état de la tâche.
+#: Icon colors according to the task state.
 COLOR_IDLE = (120, 140, 160)
 COLOR_ARMED = (235, 150, 40)
 COLOR_REMINDING = (220, 70, 60)
@@ -47,25 +47,25 @@ COLOR_REMINDING = (220, 70, 60)
 
 @dataclass(slots=True)
 class TrayCallbacks:
-    """Fonctions appelées par le tray, toutes depuis le thread de la fenêtre."""
+    """Functions called by the tray, all from the window thread."""
 
     on_configure: Callable[[], None]
     on_cancel: Callable[[], None]
-    #: Reçoit la durée du report, en minutes.
+    #: Receives the postpone duration, in minutes.
     on_postpone: Callable[[int], None]
     on_open_log: Callable[[], None]
     on_quit: Callable[[], None]
     on_suspend: Callable[[], None]
     on_resume: Callable[[], None]
-    #: Renvoie `(tâche armée ?, libellé d'état)` pour construire le menu.
+    #: Returns `(task armed?, status label)` to build the menu.
     query_state: Callable[[], tuple[bool, str]]
 
 
 class Tray:
-    """Icône de notification pilotée depuis son propre thread.
+    """Notification-area icon driven from its own thread.
 
-    `run()` crée la fenêtre puis ne rend la main qu'à l'arrêt : il doit donc
-    être appelé dans un thread dédié.
+    `run()` creates the window and only returns on shutdown: it must therefore
+    be called in a dedicated thread.
     """
 
     def __init__(self, callbacks: TrayCallbacks, tooltip: str = "Auto Shutdown") -> None:
@@ -78,15 +78,15 @@ class Tray:
         self._taskbar_created_msg = 0
         self._ready = threading.Event()
         self._notify_lock = threading.Lock()
-        # La fonction de fenêtre est référencée par Windows pendant toute la vie
-        # de la classe : sans référence Python, elle serait ramassée par le GC
-        # et l'appel suivant planterait le processus.
+        # Windows keeps a reference to the window procedure for the whole life
+        # of the class: without a Python reference it would be garbage-collected
+        # and the next call would crash the process.
         self._wndproc = winapi.WNDPROC(self._on_message)
 
-    # -- API publique ------------------------------------------------------
+    # -- public API --------------------------------------------------------
 
     def run(self) -> None:
-        """Crée la fenêtre, ajoute l'icône, puis pompe les messages."""
+        """Create the window, add the icon, then pump messages."""
         self._create_window()
         self._register_power_notifications()
         self._add_icon()
@@ -97,13 +97,13 @@ class Tray:
         return self._ready.wait(timeout)
 
     def set_state(self, color: tuple[int, int, int], tooltip: str) -> None:
-        """Met à jour l'icône et son infobulle. Appelable depuis tout thread."""
+        """Update the icon and its tooltip. Callable from any thread."""
         self._current_color = color
         self._tooltip = tooltip
         self._modify_icon()
 
     def notify(self, title: str, message: str, *, warning: bool = False) -> None:
-        """Affiche une info-bulle système. Appelable depuis tout thread."""
+        """Show a system balloon notification. Callable from any thread."""
         if self._hwnd is None:
             return
         data = self._icon_data(winapi.NIF_INFO)
@@ -114,10 +114,10 @@ class Tray:
             winapi.shell32.Shell_NotifyIconW(winapi.NIM_MODIFY, ctypes.byref(data))
 
     def shutdown(self) -> None:
-        """Demande la fermeture de la fenêtre depuis n'importe quel thread.
+        """Request the window to close, from any thread.
 
-        `DestroyWindow` n'est valide que dans le thread propriétaire de la
-        fenêtre : le travail est donc délégué via un message posté.
+        `DestroyWindow` is only valid on the thread that owns the window: the
+        work is therefore delegated through a posted message.
         """
         if self._hwnd is not None:
             winapi.user32.PostMessageW(self._hwnd, winapi.WM_CLOSE, 0, 0)
@@ -130,8 +130,8 @@ class Tray:
         wndclass.lpfnWndProc = self._wndproc
         wndclass.hInstance = hinstance
         wndclass.lpszClassName = WINDOW_CLASS
-        # Une classe déjà enregistrée renvoie 0 : sans conséquence ici, la
-        # fenêtre suivante réutilise l'enregistrement existant.
+        # An already registered class returns 0: harmless here, the next
+        # window reuses the existing registration.
         winapi.user32.RegisterClassW(ctypes.byref(wndclass))
 
         self._hwnd = winapi.user32.CreateWindowExW(
@@ -149,24 +149,25 @@ class Tray:
             None,
         )
         if not self._hwnd:
-            raise OSError(ctypes.get_last_error(), "CreateWindowExW a échoué")
+            raise OSError(ctypes.get_last_error(), "CreateWindowExW failed")
 
-        # Réenregistrement de l'icône si l'explorateur Windows redémarre.
+        # Re-register the icon if Windows Explorer restarts.
         self._taskbar_created_msg = winapi.user32.RegisterWindowMessageW("TaskbarCreated")
 
     def _register_power_notifications(self) -> None:
-        """S'abonne aux transitions veille/reprise.
+        """Subscribe to sleep/resume transitions.
 
-        Indispensable : une fenêtre non affichée ne reçoit pas les diffusions
-        `WM_POWERBROADCAST` par défaut, il faut s'y abonner explicitement.
+        Essential: a window that is never shown does not receive
+        `WM_POWERBROADCAST` broadcasts by default, so it must subscribe
+        explicitly.
         """
         self._power_handle = winapi.user32.RegisterSuspendResumeNotification(
             self._hwnd, winapi.DEVICE_NOTIFY_WINDOW_HANDLE
         )
         if not self._power_handle:
             log.error(
-                "RegisterSuspendResumeNotification a échoué (code %d) : "
-                "l'annulation automatique au retour de veille est inopérante",
+                "RegisterSuspendResumeNotification failed (code %d): "
+                "automatic cancellation on resume from sleep is inoperative",
                 ctypes.get_last_error(),
             )
 
@@ -190,7 +191,7 @@ class Tray:
         data = self._icon_data(winapi.NIF_MESSAGE | winapi.NIF_ICON | winapi.NIF_TIP)
         with self._notify_lock:
             if not winapi.shell32.Shell_NotifyIconW(winapi.NIM_ADD, ctypes.byref(data)):
-                raise OSError(ctypes.get_last_error(), "Shell_NotifyIconW(NIM_ADD) a échoué")
+                raise OSError(ctypes.get_last_error(), "Shell_NotifyIconW(NIM_ADD) failed")
 
     def _modify_icon(self) -> None:
         if self._hwnd is None:
@@ -209,7 +210,7 @@ class Tray:
         with self._notify_lock:
             winapi.shell32.Shell_NotifyIconW(winapi.NIM_DELETE, ctypes.byref(data))
 
-    # -- boucle de messages ------------------------------------------------
+    # -- message loop ------------------------------------------------------
 
     def _pump(self) -> None:
         msg = winapi.MSG()
@@ -218,26 +219,26 @@ class Tray:
             if result == 0:  # WM_QUIT
                 break
             if result == -1:
-                log.error("GetMessageW a échoué (code %d)", ctypes.get_last_error())
+                log.error("GetMessageW failed (code %d)", ctypes.get_last_error())
                 break
             winapi.user32.TranslateMessage(ctypes.byref(msg))
             winapi.user32.DispatchMessageW(ctypes.byref(msg))
 
     def _on_message(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
-        # ctypes convertit les types simples de la signature WNDPROC en entiers
-        # Python : les paramètres sont donc annotés `int`, pas `wintypes.*`.
+        # ctypes converts the simple types of the WNDPROC signature to Python
+        # integers: the parameters are therefore annotated `int`, not `wintypes.*`.
         try:
             handled = self._dispatch(msg, wparam, lparam)
         except Exception:
-            # Une exception qui traverse une fonction de fenêtre laisse Windows
-            # dans un état indéfini : elle est journalisée et absorbée.
-            log.exception("Erreur lors du traitement du message 0x%04X", msg)
+            # An exception escaping a window procedure leaves Windows in an
+            # undefined state: it is logged and swallowed.
+            log.exception("Error while handling message 0x%04X", msg)
             handled = None
         if handled is not None:
             return handled
         return winapi.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
-    def _dispatch(  # noqa: PLR0911  (aiguillage : un retour par message traité)
+    def _dispatch(  # noqa: PLR0911  (dispatch: one return per handled message)
         self, msg: int, wparam: int, lparam: int
     ) -> int | None:
         if msg == winapi.WM_TRAYICON:
@@ -252,7 +253,7 @@ class Tray:
             return self._on_power_event(wparam)
 
         if msg == self._taskbar_created_msg and self._taskbar_created_msg:
-            log.info("Explorateur redémarré : réinsertion de l'icône")
+            log.info("Explorer restarted: re-adding the icon")
             self._add_icon()
             return 0
 
@@ -271,10 +272,10 @@ class Tray:
         if event == winapi.PBT_APMSUSPEND:
             self._cb.on_suspend()
         elif event in (winapi.PBT_APMRESUMESUSPEND, winapi.PBT_APMRESUMEAUTOMATIC):
-            # Les deux événements arrivent souvent à la suite pour une même
-            # reprise ; le traitement en aval doit donc être idempotent.
+            # Both events often arrive back to back for a single resume;
+            # downstream handling must therefore be idempotent.
             self._cb.on_resume()
-        return 1  # TRUE : message traité.
+        return 1  # TRUE: message handled.
 
     def _on_tray_event(self, mouse_msg: int) -> None:
         if mouse_msg in (winapi.WM_LBUTTONUP, winapi.WM_LBUTTONDBLCLK):
@@ -306,10 +307,10 @@ class Tray:
         try:
             winapi.user32.AppendMenuW(menu, winapi.MF_STRING | winapi.MF_GRAYED, 0, status)
             winapi.user32.AppendMenuW(menu, winapi.MF_SEPARATOR, 0, None)
-            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_CONFIGURE, "Configurer et armer…")
+            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_CONFIGURE, tr("menu.configure"))
             flags = winapi.MF_STRING if armed else winapi.MF_STRING | winapi.MF_GRAYED
-            # Le sous-menu est rattaché au menu principal : `DestroyMenu` sur ce
-            # dernier libère aussi celui-ci, aucun nettoyage séparé n'est requis.
+            # The submenu is attached to the main menu: `DestroyMenu` on the
+            # latter also frees it, so no separate cleanup is required.
             submenu = winapi.user32.CreatePopupMenu()
             if submenu:
                 for index, minutes in enumerate(POSTPONE_CHOICES):
@@ -317,18 +318,20 @@ class Tray:
                         submenu,
                         winapi.MF_STRING,
                         CMD_POSTPONE_BASE + index,
-                        f"{minutes} minutes",
+                        tr("menu.postpone_choice", minutes=minutes),
                     )
-                winapi.user32.AppendMenuW(menu, flags | winapi.MF_POPUP, submenu, "Reporter de")
-            winapi.user32.AppendMenuW(menu, flags, CMD_CANCEL, "Annuler la tâche")
+                winapi.user32.AppendMenuW(
+                    menu, flags | winapi.MF_POPUP, submenu, tr("menu.postpone")
+                )
+            winapi.user32.AppendMenuW(menu, flags, CMD_CANCEL, tr("menu.cancel"))
             winapi.user32.AppendMenuW(menu, winapi.MF_SEPARATOR, 0, None)
-            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_OPEN_LOG, "Ouvrir le journal")
-            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_QUIT, "Quitter")
+            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_OPEN_LOG, tr("menu.open_log"))
+            winapi.user32.AppendMenuW(menu, winapi.MF_STRING, CMD_QUIT, tr("menu.quit"))
 
             point = winapi.POINT()
             winapi.user32.GetCursorPos(ctypes.byref(point))
-            # Passer au premier plan avant d'afficher le menu, faute de quoi
-            # celui-ci reste ouvert lorsque l'utilisateur clique ailleurs.
+            # Bring the window to the foreground before showing the menu,
+            # otherwise it stays open when the user clicks elsewhere.
             winapi.user32.SetForegroundWindow(self._hwnd)
             command = winapi.user32.TrackPopupMenu(
                 menu,
@@ -339,8 +342,8 @@ class Tray:
                 self._hwnd,
                 None,
             )
-            # Message neutre exigé par la documentation pour que le menu se
-            # referme proprement après la sélection.
+            # Neutral message required by the documentation so the menu
+            # closes cleanly after the selection.
             winapi.user32.PostMessageW(self._hwnd, winapi.WM_NULL, 0, 0)
             if command:
                 self._on_command(int(command))
