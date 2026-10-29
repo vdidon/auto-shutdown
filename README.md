@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/vdidon/auto-shutdown/releases/latest"><img src="https://img.shields.io/github/v/release/vdidon/auto-shutdown" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white" alt="Windows 10 | 11">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/dependencies-none-2ea44f" alt="No dependencies">
@@ -33,51 +34,41 @@ designed so that it cannot happen.
   detection of interrupted countdowns
   ([details](docs/reliability.md)).
 - 📋 **Timestamped log** of every arming, cancellation and power transition.
-- 🪶 **No runtime dependency** — `ctypes` and `tkinter` are enough; standalone
-  executable of about 12 MB.
+- 🪶 **Nothing to install** — a single portable executable of about 12 MB, no
+  Python required.
+
+<p align="center">
+  <a href="https://github.com/vdidon/auto-shutdown/releases/latest/download/auto-shutdown.exe"><strong>⬇️ Download auto-shutdown.exe</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/vdidon/auto-shutdown/releases">All releases</a>
+</p>
 
 ## Installation
 
-```console
-> git clone https://github.com/vdidon/auto-shutdown.git auto_shutdown
-> cd auto_shutdown
-> uv sync
-> uv run auto-shutdown
-```
+1. Download `auto-shutdown.exe` from the
+   [latest release](https://github.com/vdidon/auto-shutdown/releases/latest).
+2. Put it wherever you like, for instance in
+   `%LOCALAPPDATA%\Programs\auto-shutdown\`. There is no installer: the
+   executable is the whole program.
+3. Run it.
 
-## Standalone executable
-
-```console
-> .\build.ps1
-```
-
-The script regenerates the icon, then builds `dist\auto-shutdown.exe` — about
-12 MB, no console, and independent of any Python installed on the target
-machine.
-
-```console
-> .\build.ps1 -OneDir
-```
-
-Produces a folder instead of a single file. Startup is noticeably faster: with
-`--onefile`, the bootloader re-extracts the archive into `%TEMP%` on every
-launch. For a program started once per session, the single file remains the most
-convenient; `-OneDir` is worth it if the delay is a nuisance.
-
-The icon is produced by `tools/make_ico.py`, in pure Python, without Pillow: a
-slate disc bearing the power symbol, in 16, 32, 48 and 256 pixel sizes. The
-`assets/auto-shutdown.ico` file is versioned, so the build does not need the
-tool. It serves both as the executable's icon and as the windows' icon.
+The executable is not code-signed, so on first launch Windows SmartScreen may
+show *Windows protected your PC*: choose **More info**, then **Run anyway**.
+For the same reason, some antivirus products flag executables built with
+PyInstaller; the [source](#building-from-source) and the build script are here
+to check what it contains.
 
 ### Launching at sign-in
 
 Put a shortcut to the executable in the startup folder, which you open with
-`Win+R` then `shell:startup`. In PowerShell:
+`Win+R` then `shell:startup`. In PowerShell, adjusting the path to where you
+saved the executable:
 
 ```powershell
+$exe  = "$env:LOCALAPPDATA\Programs\auto-shutdown\auto-shutdown.exe"
 $link = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Auto Shutdown.lnk"
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
-$s.TargetPath = (Resolve-Path .\dist\auto-shutdown.exe).Path
+$s.TargetPath = $exe
 $s.Arguments = '--minimized'
 $s.Save()
 ```
@@ -95,6 +86,16 @@ with exit code 2, without an error window.
 | `--minimized` | starts without opening the configuration window |
 | `--verbose` | detailed logging, also on the console |
 | `--version` | prints the version number and exits |
+
+### Uninstalling
+
+Quit the program from its tray menu, then delete the executable, the startup
+shortcut if you created one, and the two data folders:
+
+```
+%APPDATA%\auto-shutdown          settings
+%LOCALAPPDATA%\auto-shutdown     log
+```
 
 ## Usage
 
@@ -176,6 +177,41 @@ back to their defaults.
 | `input_quiet_timeout` | `30.0` | cap on the wait for that quiet period |
 | `stall_threshold_seconds` | `60.0` | threshold for detecting an interrupted countdown |
 
+## Building from source
+
+Requires Python 3.13 and [uv](https://docs.astral.sh/uv/).
+
+```console
+> git clone https://github.com/vdidon/auto-shutdown.git
+> cd auto-shutdown
+> uv sync
+> uv run auto-shutdown
+```
+
+To build the executable:
+
+```console
+> .\build.ps1
+```
+
+The script regenerates the icon, then builds `dist\auto-shutdown.exe` — about
+12 MB, no console, and independent of any Python installed on the target
+machine.
+
+```console
+> .\build.ps1 -OneDir
+```
+
+Produces a folder instead of a single file. Startup is noticeably faster: with
+`--onefile`, the bootloader re-extracts the archive into `%TEMP%` on every
+launch. For a program started once per session, the single file remains the most
+convenient; `-OneDir` is worth it if the delay is a nuisance.
+
+The icon is produced by `tools/make_ico.py`, in pure Python, without Pillow: a
+slate disc bearing the power symbol, in 16, 32, 48 and 256 pixel sizes. The
+`assets/auto-shutdown.ico` file is versioned, so the build does not need the
+tool. It serves both as the executable's icon and as the windows' icon.
+
 ## Architecture
 
 ```
@@ -218,9 +254,21 @@ from a PyInstaller executable. `pyproject.toml` necessarily carries the same
 value for the distribution: a test refuses to let the two diverge, and requires
 a changelog entry for the current version.
 
-Publishing a release therefore boils down to changing `__version__`, copying the
-value into `pyproject.toml`, adding the matching section to the changelog, then
-rebuilding.
+Publishing a release:
+
+1. change `__version__`, copy the value into `pyproject.toml`, and add the
+   matching section to the changelog;
+2. rebuild with `.\build.ps1`;
+3. tag and publish, attaching the executable under its plain name — the
+   download link at the top of this page points to
+   `releases/latest/download/auto-shutdown.exe`, so a versioned file name
+   would break it:
+
+```console
+> git tag v0.1.0
+> git push origin main v0.1.0
+> gh release create v0.1.0 dist\auto-shutdown.exe --title "v0.1.0" --notes-file <notes>
+```
 
 ## Development
 
