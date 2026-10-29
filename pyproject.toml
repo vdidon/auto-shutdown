@@ -1,0 +1,76 @@
+[project]
+name = "auto-shutdown"
+version = "0.1.0"
+description = "Programmation fiable d'une mise en veille, d'un arrêt ou d'un verrouillage différé sous Windows"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "valère didon", email = "vdidon@live.fr" }
+]
+requires-python = ">=3.13"
+keywords = ["windows", "shutdown", "hibernate", "sleep", "scheduler", "tray"]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
+# Aucune dépendance d'exécution : ctypes et tkinter font partie de la
+# bibliothèque standard. L'exécutable produit reste donc léger.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/vdidon/auto-shutdown"
+Repository = "https://github.com/vdidon/auto-shutdown"
+Issues = "https://github.com/vdidon/auto-shutdown/issues"
+Changelog = "https://github.com/vdidon/auto-shutdown/blob/main/CHANGELOG.md"
+
+[project.scripts]
+auto-shutdown = "auto_shutdown.app:main"
+
+[project.gui-scripts]
+# Variante sans console, adaptée à un lancement au démarrage de session.
+auto-shutdown-tray = "auto_shutdown.app:main"
+
+[dependency-groups]
+dev = [{ include-group = "lint" }, { include-group = "test" }]
+lint = ["ruff>=0.14"]
+test = ["pytest>=8.3", "pytest-cov>=6.0"]
+build = ["pyinstaller>=6.11"]
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "F", "E", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "ISC",
+    "PIE", "PT", "RET", "SIM", "TID", "ARG", "PTH", "PL", "RUF",
+]
+ignore = [
+    # La couche ctypes reproduit la casse et les signatures de l'API Windows.
+    "N803", "N806",
+    # Les messages d'exception littéraux restent lisibles tels quels.
+    "EM101", "EM102",
+    "ISC001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.coverage.run]
+source = ["auto_shutdown"]
+# Les modules d'interface exigent une session Windows interactive : ils sont
+# vérifiés manuellement, pas par la suite automatisée.
+omit = ["*/tray.py", "*/ui.py", "*/__main__.py"]
