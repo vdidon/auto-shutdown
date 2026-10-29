@@ -1,15 +1,15 @@
-"""Génère l'icône de l'exécutable, sans dépendance externe.
+"""Generate the executable's icon, with no external dependency.
 
-Produit `assets/auto-shutdown.ico` : un disque portant le symbole universel de
-mise en marche. Le fichier résultant est versionné, si bien que la construction
-de l'exécutable n'a pas besoin de cet outil.
+Produces `assets/auto-shutdown.ico`: a disc bearing the universal power
+symbol. The resulting file is versioned, so building the executable does not
+need this tool.
 
-Le format ICO est écrit à la main : un en-tête `ICONDIR`, une entrée
-`ICONDIRENTRY` par taille, puis pour chaque image un `BITMAPINFOHEADER` de
-hauteur double suivi des pixels BGRA rangés du bas vers le haut et d'un masque
-AND laissé à zéro — la couche alpha porte déjà la transparence.
+The ICO format is written by hand: an `ICONDIR` header, one `ICONDIRENTRY` per
+size, then for each image a `BITMAPINFOHEADER` of double height followed by
+the BGRA pixels stored bottom-up and an AND mask left at zero — the alpha
+channel already carries the transparency.
 
-Usage :
+Usage:
     uv run python tools/make_ico.py
 """
 
@@ -21,45 +21,49 @@ from pathlib import Path
 
 SIZES = (16, 32, 48, 256)
 
-#: Le format ICO code chaque dimension sur un seul octet ; la valeur 0 y désigne
-#: conventionnellement 256 pixels.
+#: The ICO format encodes each dimension in a single byte; the value 0 there
+#: conventionally means 256 pixels.
 ICO_DIMENSION_LIMIT = 256
 OUTPUT = Path(__file__).resolve().parent.parent / "assets" / "auto-shutdown.ico"
 
-#: Ardoise sombre pour le disque, blanc cassé pour le symbole. Ce couple reste
-#: lisible aussi bien sur une barre des tâches claire que sombre.
+#: Dark slate for the disc, off-white for the symbol. This pair stays legible
+#: on both a light and a dark taskbar.
 DISC_COLOR = (46, 60, 74)
 GLYPH_COLOR = (245, 247, 250)
 
-#: Demi-ouverture de l'échancrure supérieure de l'anneau, en radians.
+#: Half-opening of the ring's top gap, in radians.
 GAP_HALF_ANGLE = math.radians(34)
+
+#: Width of the anti-aliased edge, in pixels. It must not grow with the image:
+#: edges blend over one pixel at any size, otherwise large sizes look blurred.
+FEATHER = 1.0
 
 
 def _coverage(distance: float, radius: float, feather: float) -> float:
-    """Fraction d'un pixel couverte par un disque de rayon `radius`."""
+    """Fraction of a pixel covered by a disc of radius `radius`."""
     return max(0.0, min(1.0, (radius - distance) / feather + 0.5))
 
 
 def _glyph_alpha(x: float, y: float, size: int) -> float:
-    """Opacité du symbole de mise en marche au point donné.
+    """Opacity of the power symbol at the given point.
 
-    Le repère est visuel : `y` croît vers le bas, l'origine est le coin
-    supérieur gauche.
+    The coordinate system is visual: `y` grows downwards, the origin is the
+    top-left corner.
     """
     centre = (size - 1) / 2.0
     dx = x - centre
     dy = y - centre
     ring_radius = size * 0.26
     thickness = max(1.6, size * 0.105)
-    feather = max(0.8, size / 32.0)
+    feather = FEATHER
 
-    # Anneau, moins l'échancrure du haut par laquelle passe la barre.
+    # Ring, minus the top gap through which the bar passes.
     distance = math.hypot(dx, dy)
     ring = _coverage(abs(distance - ring_radius), thickness / 2.0, feather)
     if dy < 0 and abs(math.atan2(dx, -dy)) < GAP_HALF_ANGLE:
         ring = 0.0
 
-    # Barre verticale, du sommet de l'anneau vers le centre.
+    # Vertical bar, from the top of the ring towards the centre.
     bar_top = centre - size * 0.36
     bar_bottom = centre - size * 0.06
     horizontal = _coverage(abs(dx), thickness / 2.0, feather)
@@ -75,22 +79,22 @@ def _glyph_alpha(x: float, y: float, size: int) -> float:
 
 
 def _render(size: int) -> bytes:
-    """Rend une image BGRA rangée du bas vers le haut."""
+    """Render a BGRA image stored bottom-up."""
     centre = (size - 1) / 2.0
     disc_radius = size / 2.0 - max(0.5, size / 32.0)
-    feather = max(0.8, size / 24.0)
+    feather = FEATHER
     pixels = bytearray(size * size * 4)
 
     for row in range(size):
-        y = size - 1 - row  # les lignes sont stockées du bas vers le haut
+        y = size - 1 - row  # rows are stored bottom-up
         for x in range(size):
             disc = _coverage(math.hypot(x - centre, y - centre), disc_radius, feather)
             if disc <= 0.0:
                 continue
             glyph = _glyph_alpha(x, y, size)
 
-            # Le symbole est composé par-dessus le disque, le tout étant ensuite
-            # limité par la couverture du disque : le glyphe ne déborde jamais.
+            # The symbol is composited over the disc, and the result is then
+            # limited by the disc coverage: the glyph never overflows.
             red = DISC_COLOR[0] + (GLYPH_COLOR[0] - DISC_COLOR[0]) * glyph
             green = DISC_COLOR[1] + (GLYPH_COLOR[1] - DISC_COLOR[1]) * glyph
             blue = DISC_COLOR[2] + (GLYPH_COLOR[2] - DISC_COLOR[2]) * glyph
@@ -105,7 +109,7 @@ def _render(size: int) -> bytes:
         "<IiiHHIIiiII",
         40,  # biSize
         size,  # biWidth
-        size * 2,  # biHeight : plan couleur puis masque AND
+        size * 2,  # biHeight: colour plane then AND mask
         1,  # biPlanes
         32,  # biBitCount
         0,  # biCompression
@@ -115,7 +119,7 @@ def _render(size: int) -> bytes:
         0,
         0,
     )
-    mask_row = ((size + 31) // 32) * 4  # lignes du masque alignées sur 4 octets
+    mask_row = ((size + 31) // 32) * 4  # mask rows aligned to 4 bytes
     return header + bytes(pixels) + bytes(mask_row * size)
 
 
@@ -129,10 +133,10 @@ def build_ico(sizes: tuple[int, ...] = SIZES) -> bytes:
             "<BBBBHHII",
             size if size < ICO_DIMENSION_LIMIT else 0,
             size if size < ICO_DIMENSION_LIMIT else 0,
-            0,  # palette non utilisée
+            0,  # palette unused
             0,
-            1,  # plans
-            32,  # bits par pixel
+            1,  # planes
+            32,  # bits per pixel
             len(image),
             offset,
         )
@@ -145,7 +149,7 @@ def main() -> None:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     data = build_ico()
     OUTPUT.write_bytes(data)
-    print(f"{OUTPUT} — {len(data) / 1024:.0f} Kio, tailles {', '.join(map(str, SIZES))}")
+    print(f"{OUTPUT} — {len(data) / 1024:.0f} KiB, sizes {', '.join(map(str, SIZES))}")
 
 
 if __name__ == "__main__":
